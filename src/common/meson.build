@@ -1,5 +1,8 @@
 common_files += files(
-	'Platform.cpp',
+	'Bson.cpp',
 	'String.cpp',
 	'tpt-rand.cpp',
 )
+
+subdir('clipboard')
+subdir('platform')
