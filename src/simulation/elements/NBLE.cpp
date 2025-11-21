@@ -1,10 +1,12 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_NBLE PT_NBLE 52
-Element_NBLE::Element_NBLE()
+#include "simulation/ElementCommon.h"
+
+static int update(UPDATE_FUNC_ARGS);
+
+void Element::Element_NBLE()
 {
 	Identifier = "DEFAULT_PT_NBLE";
 	Name = "NBLE";
-	Colour = PIXPACK(0xEB4917);
+	Colour = 0xEB4917_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_GAS;
 	Enabled = 1;
@@ -27,9 +29,9 @@ Element_NBLE::Element_NBLE()
 
 	Weight = 1;
 
-	Temperature = R_TEMP+2.0f	+273.15f;
+	DefaultProperties.temp = R_TEMP + 2.0f + 273.15f;
 	HeatConduct = 106;
-	Description = "Noble Gas. Diffuses and conductive. Ionizes into plasma when introduced to electricity.";
+	Description = "Noble Gas. Ionizes into plasma when sparked. Diffuses.";
 
 	Properties = TYPE_GAS|PROP_CONDUCTS|PROP_LIFE_DEC;
 
@@ -42,16 +44,17 @@ Element_NBLE::Element_NBLE()
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
 
-	Update = &Element_NBLE::update;
+	Update = &update;
 }
 
-//#TPT-Directive ElementHeader Element_NBLE static int update(UPDATE_FUNC_ARGS)
-int Element_NBLE::update(UPDATE_FUNC_ARGS)
+static int update(UPDATE_FUNC_ARGS)
 {
+	auto &sd = SimulationData::CRef();
+	auto &can_move = sd.can_move;
 	if (parts[i].temp > 5273.15 && sim->pv[y/CELL][x/CELL] > 100.0f)
 	{
 		parts[i].tmp |= 0x1;
-		if (!(rand()%5))
+		if (sim->rng.chance(1, 5))
 		{
 			int j;
 			float temp = parts[i].temp;
@@ -60,7 +63,7 @@ int Element_NBLE::update(UPDATE_FUNC_ARGS)
 			j = sim->create_part(-3,x,y,PT_NEUT);
 			if (j != -1)
 				parts[j].temp = temp;
-			if (!(rand()%25))
+			if (sim->rng.chance(1, 25))
 			{
 				j = sim->create_part(-3,x,y,PT_ELEC);
 				if (j != -1)
@@ -73,8 +76,8 @@ int Element_NBLE::update(UPDATE_FUNC_ARGS)
 				parts[j].temp = temp;
 				parts[j].tmp = 0x1;
 			}
-			int rx = x+rand()%3-1, ry = y+rand()%3-1, rt = TYP(pmap[ry][rx]);
-			if (sim->can_move[PT_PLSM][rt] || rt == PT_NBLE)
+			int rx = x + sim->rng.between(-1, 1), ry = y + sim->rng.between(-1, 1), rt = TYP(pmap[ry][rx]);
+			if (can_move[PT_PLSM][rt] || rt == PT_NBLE)
 			{
 				j = sim->create_part(-3,rx,ry,PT_PLSM);
 				if (j != -1)
@@ -83,12 +86,9 @@ int Element_NBLE::update(UPDATE_FUNC_ARGS)
 					parts[j].tmp |= 4;
 				}
 			}
-			parts[i].temp = temp+1750+rand()%500;
+			parts[i].temp = temp + 1750 + sim->rng.between(0, 499);
 			sim->pv[y/CELL][x/CELL] += 50;
 		}
 	}
 	return 0;
 }
-
-
-Element_NBLE::~Element_NBLE() {}

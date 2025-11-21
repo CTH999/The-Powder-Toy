@@ -1,21 +1,20 @@
-#ifndef TOOLBUTTON_H_
-#define TOOLBUTTON_H_
-
+#pragma once
 #include "gui/interface/Button.h"
+
+class Tool;
 
 class ToolButton: public ui::Button
 {
 	int currentSelection;
-	std::string toolIdentifier;
+	ByteString toolIdentifier;
 public:
-	ToolButton(ui::Point position, ui::Point size, std::string text_, std::string toolIdentifier, std::string toolTip = "");
-	virtual void OnMouseUnclick(int x, int y, unsigned int button);
-	virtual void OnMouseUp(int x, int y, unsigned int button);
-	virtual void OnMouseClick(int x, int y, unsigned int button);
-	virtual void Draw(const ui::Point& screenPos);
+	ToolButton(ui::Point position, ui::Point size, String text, ByteString toolIdentifier, String toolTip = String());
+	void OnMouseDown(int x, int y, unsigned int button) override;
+	void OnMouseUp(int x, int y, unsigned int button) override;
+	void OnMouseClick(int x, int y, unsigned int button) override;
+	void Draw(const ui::Point& screenPos) override;
 	void SetSelectionState(int state);
 	int GetSelectionState();
-	virtual ~ToolButton();
+	Tool *tool;
+	Rect<int> ClipRect = RectSized(Vec2<int>::Zero, Vec2<int>::Zero);
 };
-
-#endif /* TOOLBUTTON_H_ */

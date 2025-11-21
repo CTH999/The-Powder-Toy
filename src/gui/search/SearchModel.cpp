@@ -1,21 +1,24 @@
 #include "SearchModel.h"
+#include "SearchView.h"
+#include "Format.h"
 #include "client/SaveInfo.h"
-
+#include "client/GameSave.h"
 #include "client/Client.h"
+#include "client/http/SearchSavesRequest.h"
+#include "client/http/SearchTagsRequest.h"
+#include <algorithm>
+#include <thread>
+#include <cmath>
 
 SearchModel::SearchModel():
-	loadedSave(NULL),
-	currentSort("best"),
+	currentPeriod(http::allSaves),
+	currentSort(http::sortByVotes),
 	currentPage(1),
 	resultCount(0),
+	includesFp(false),
 	showOwn(false),
 	showFavourite(false),
-	showTags(true),
-	saveListLoaded(false),
-	updateSaveListWorking(false),
-	updateSaveListFinished(false),
-	updateTagListWorking(false),
-	updateTagListFinished(false)
+	showTags(true)
 {
 }
 
@@ -26,45 +29,59 @@ void SearchModel::SetShowTags(bool show)
 
 bool SearchModel::GetShowTags()
 {
-	return showTags;	
+	return showTags;
 }
 
-TH_ENTRY_POINT void * SearchModel::updateSaveListTHelper(void * obj)
+void SearchModel::BeginSearchSaves(int start, int count, String query, http::Period period, http::Sort sort, http::Category category)
 {
-	return ((SearchModel *)obj)->updateSaveListT();
+	lastError = "";
+	resultCount = 0;
+	searchSaves = std::make_unique<http::SearchSavesRequest>(start, count, query.ToUtf8(), period, sort, category);
+	searchSaves->Start();
+	includesFp = searchSaves->GetIncludesFp();
 }
 
-void * SearchModel::updateSaveListT()
+std::vector<std::unique_ptr<SaveInfo>> SearchModel::EndSearchSaves()
 {
-	std::string category = "";
-	if(showFavourite)
-		category = "Favourites";
-	if(showOwn && Client::Ref().GetAuthUser().UserID)
-		category = "by:"+Client::Ref().GetAuthUser().Username;
-	vector<SaveInfo*> * saveList = Client::Ref().SearchSaves((currentPage-1)*20, 20, lastQuery, currentSort=="new"?"date":"votes", category, thResultCount);
-
-	updateSaveListFinished = true;
-	return saveList;
+	std::vector<std::unique_ptr<SaveInfo>> saveArray;
+	try
+	{
+		std::tie(resultCount, saveArray) = searchSaves->Finish();
+	}
+	catch (const http::RequestError &ex)
+	{
+		lastError = ByteString(ex.what()).FromUtf8();
+	}
+	searchSaves.reset();
+	return saveArray;
 }
 
-TH_ENTRY_POINT void * SearchModel::updateTagListTHelper(void * obj)
+void SearchModel::BeginGetTags(int start, int count, String query)
 {
-	return ((SearchModel *)obj)->updateTagListT();
+	lastError = "";
+	getTags = std::make_unique<http::SearchTagsRequest>(start, count, query.ToUtf8());
+	getTags->Start();
 }
 
-void * SearchModel::updateTagListT()
+std::vector<std::pair<ByteString, int>> SearchModel::EndGetTags()
 {
-	int tagResultCount;
-	std::vector<std::pair<std::string, int> > * tagList = Client::Ref().GetTags(0, 24, "", tagResultCount);
-
-	updateTagListFinished = true;
-	return tagList;
+	std::vector<std::pair<ByteString, int>> tagArray;
+	try
+	{
+		tagArray = getTags->Finish();
+	}
+	catch (const http::RequestError &ex)
+	{
+		lastError = ByteString(ex.what()).FromUtf8();
+	}
+	getTags.reset();
+	return tagArray;
 }
 
-bool SearchModel::UpdateSaveList(int pageNumber, std::string query)
+bool SearchModel::UpdateSaveList(int pageNumber, String query)
 {
 	//Threading
-	if (!updateSaveListWorking)
+	if (!searchSaves)
 	{
 		lastQuery = query;
 		lastError = "";
@@ -73,10 +90,18 @@ bool SearchModel::UpdateSaveList(int pageNumber, std::string query)
 		//resultCount = 0;
 		currentPage = pageNumber;
 
-		if(pageNumber == 1 && !showOwn && !showFavourite && currentSort == "best" && query == "")
-			SetShowTags(true);
-		else
-			SetShowTags(false);
+		auto category = http::categoryNone;
+		if (showFavourite)
+		{
+			category = http::categoryFavourites;
+		}
+		if (showOwn && Client::Ref().GetAuthUser())
+		{
+			category = http::categoryMyOwn;
+		}
+		BeginSearchSaves((currentPage-1)*20, 20, lastQuery, currentPeriod, currentSort, category);
+
+		SetShowTags(includesFp && pageNumber == 1);
 
 		notifySaveListChanged();
 		notifyTagListChanged();
@@ -84,96 +109,60 @@ bool SearchModel::UpdateSaveList(int pageNumber, std::string query)
 		selected.clear();
 		notifySelectedChanged();
 
-		if(GetShowTags() && !tagList.size() && !updateTagListWorking)
+		if (GetShowTags() && !tagList.size() && !getTags)
 		{
-			updateTagListFinished = false;
-			updateTagListWorking = true;
-			pthread_create(&updateTagListThread, 0, &SearchModel::updateTagListTHelper, this);
+			BeginGetTags(0, 24, "");
 		}
-		
-		updateSaveListFinished = false;
-		updateSaveListWorking = true;
-		pthread_create(&updateSaveListThread, 0, &SearchModel::updateSaveListTHelper, this);
+
 		return true;
 	}
 	return false;
 }
 
-void SearchModel::SetLoadedSave(SaveInfo * save)
+void SearchModel::SetLoadedSave(std::unique_ptr<SaveInfo> save)
 {
-	if(loadedSave != save && loadedSave)
-		delete loadedSave;
-	if(save)
-	{
-		loadedSave = new SaveInfo(*save);
-	}
-	else
-	{
-		loadedSave = NULL;
-	}
+	loadedSave = std::move(save);
 }
 
-SaveInfo * SearchModel::GetLoadedSave(){
-	return loadedSave;
-}
-
-vector<SaveInfo*> SearchModel::GetSaveList()
+const SaveInfo *SearchModel::GetLoadedSave() const
 {
-	return saveList;
+	return loadedSave.get();
 }
 
-vector<pair<string, int> > SearchModel::GetTagList()
+std::unique_ptr<SaveInfo> SearchModel::TakeLoadedSave()
+{
+	return std::move(loadedSave);
+}
+
+std::vector<SaveInfo *> SearchModel::GetSaveList() // non-owning
+{
+	std::vector<SaveInfo *> nonOwningSaveList;
+	std::transform(saveList.begin(), saveList.end(), std::back_inserter(nonOwningSaveList), [](auto &ptr) {
+		return ptr.get();
+	});
+	return nonOwningSaveList;
+}
+
+std::vector<std::pair<ByteString, int> > SearchModel::GetTagList()
 {
 	return tagList;
 }
 
 void SearchModel::Update()
 {
-	if(updateSaveListWorking)
+	if (searchSaves && searchSaves->CheckDone())
 	{
-		if(updateSaveListFinished)
-		{
-			updateSaveListWorking = false;
-			lastError = "";
-			saveListLoaded = true;
-
-			vector<SaveInfo*> * tempSaveList;
-			pthread_join(updateSaveListThread, (void**)&tempSaveList);
-
-			if(tempSaveList)
-			{
-				saveList = *tempSaveList;
-				delete tempSaveList;
-			}
-
-			if(!saveList.size())
-			{
-				lastError = Client::Ref().GetLastError();
-				if (lastError == "Unspecified Error")
-					lastError = "";
-			}
-			
-			resultCount = thResultCount;
-			notifyPageChanged();
-			notifySaveListChanged();
-		}
+		saveListLoaded = true;
+		lastError = "";
+		saveList = EndSearchSaves();
+		notifyPageChanged();
+		notifySaveListChanged();
 	}
-	if(updateTagListWorking)
+	if (getTags && getTags->CheckDone())
 	{
-		if(updateTagListFinished)
-		{
-			updateTagListWorking = false;
-
-			vector<pair<string, int> > * tempTagList;
-			pthread_join(updateTagListThread, (void**)&tempTagList);
-
-			if(tempTagList)
-			{
-				tagList = *tempTagList;
-				delete tempTagList;
-			}
-			notifyTagListChanged();
-		}
+		lastError = "";
+		tagList = EndGetTags();
+		notifyTagListChanged();
 	}
 }
 
@@ -182,6 +171,7 @@ void SearchModel::AddObserver(SearchView * observer)
 	observers.push_back(observer);
 	observer->NotifySaveListChanged(this);
 	observer->NotifyPageChanged(this);
+	observer->NotifyPeriodChanged(this);
 	observer->NotifySortChanged(this);
 	observer->NotifyShowOwnChanged(this);
 	observer->NotifyTagListChanged(this);
@@ -200,21 +190,32 @@ void SearchModel::SelectSave(int saveID)
 	notifySelectedChanged();
 }
 
-void SearchModel::DeselectSave(int saveID)
+void SearchModel::SelectAllSaves()
 {
-	bool changed = false;
-restart:
-	for (size_t i = 0; i < selected.size(); i++)
+	if (selected.size() == saveList.size())
 	{
-		if (selected[i] == saveID)
+		for (auto &save : saveList)
 		{
-			selected.erase(selected.begin()+i);
-			changed = true;
-			goto restart; //Just ensure all cases are removed.
+			DeselectSave(save->id);
 		}
 	}
-	if(changed)
+	else
+	{
+		for (auto &save : saveList)
+		{
+			SelectSave(save->id);
+		}
+	}
+}
+
+void SearchModel::DeselectSave(int saveID)
+{
+	if (std::erase_if(selected, [saveID](auto &item) {
+		return item == saveID;
+	}))
+	{
 		notifySelectedChanged();
+	}
 }
 
 void SearchModel::notifySaveListChanged()
@@ -241,6 +242,15 @@ void SearchModel::notifyPageChanged()
 	{
 		SearchView* cObserver = observers[i];
 		cObserver->NotifyPageChanged(this);
+	}
+}
+
+void SearchModel::notifyPeriodChanged()
+{
+	for (size_t i = 0; i < observers.size(); i++)
+	{
+		SearchView* cObserver = observers[i];
+		cObserver->NotifyPeriodChanged(this);
 	}
 }
 
@@ -280,7 +290,7 @@ void SearchModel::notifySelectedChanged()
 	}
 }
 
-SearchModel::~SearchModel()
+int SearchModel::GetPageCount()
 {
-	delete loadedSave;
+	return std::max(1, (int)(ceil(resultCount/20.0f)) + (includesFp ? 1 : 0)); //add one for front page (front page saves are repeated twice)
 }

@@ -1,13 +1,11 @@
-#ifndef CONSOLEMODEL_H_
-#define CONSOLEMODEL_H_
-
+#pragma once
+#include "ConsoleCommand.h"
 #include <vector>
 #include <deque>
-#include "ConsoleView.h"
-#include "ConsoleCommand.h"
 
 class ConsoleView;
-class ConsoleModel {
+class ConsoleModel
+{
 	size_t currentCommandIndex;
 	std::vector<ConsoleView*> observers;
 	std::deque<ConsoleCommand> previousCommands;
@@ -22,7 +20,4 @@ public:
 	ConsoleModel();
 	void AddObserver(ConsoleView * observer);
 	void AddLastCommand(ConsoleCommand command);
-	virtual ~ConsoleModel();
 };
-
-#endif /* CONSOLEMODEL_H_ */

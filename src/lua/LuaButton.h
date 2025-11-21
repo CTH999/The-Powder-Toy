@@ -13,15 +13,15 @@ class LuaScriptInterface;
 class LuaButton: public LuaComponent
 {
 	ui::Button * button;
-	int actionFunction;
+	LuaComponentCallback actionFunction;
 	void triggerAction();
-	int action(lua_State * l);
-	int text(lua_State * l);
-	int enabled(lua_State * l);
+	int action(lua_State *L);
+	int text(lua_State *L);
+	int enabled(lua_State *L);
 public:
 	static const char className[];
 	static Luna<LuaButton>::RegType methods[];
 
-	LuaButton(lua_State * l);
+	LuaButton(lua_State *L);
 	~LuaButton();
 };
