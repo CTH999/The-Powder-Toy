@@ -1,10 +1,11 @@
 #include "gui/interface/Button.h"
-
 #include "gui/interface/Window.h"
-
+#include "gui/interface/Engine.h"
 #include "graphics/Graphics.h"
 #include "Misc.h"
 #include "Colour.h"
+#include <cmath>
+#include <numbers>
 
 namespace ui {
 
@@ -15,8 +16,7 @@ Button::Button(Point position, Point size, String buttonText, String toolTip):
 	isButtonDown(false),
 	isMouseInside(false),
 	isTogglable(false),
-	toggle(false),
-	actionCallback(NULL)
+	toggle(false)
 {
 	TextPosition(ButtonText);
 }
@@ -26,10 +26,10 @@ void Button::TextPosition(String ButtonText)
 	buttonDisplayText = ButtonText;
 	if(buttonDisplayText.length())
 	{
-		if(Graphics::textwidth(buttonDisplayText) > Size.X - (Appearance.icon? 22 : 0))
+		if (Graphics::TextSize(buttonDisplayText).X - 1 > Size.X - (Appearance.icon ? 22 : 0))
 		{
-			int position = Graphics::textwidthx(buttonDisplayText, Size.X - (Appearance.icon? 38 : 22));
-			buttonDisplayText = buttonDisplayText.erase(position, buttonDisplayText.length()-position);
+			auto it = Graphics::TextFit(buttonDisplayText, Size.X - (Appearance.icon ? 38 : 22));
+			buttonDisplayText.erase(it, buttonDisplayText.end());
 			buttonDisplayText += "...";
 		}
 	}
@@ -87,7 +87,7 @@ void Button::Draw(const Point& screenPos)
 
 	if (Enabled)
 	{
-		if (isButtonDown || (isTogglable && toggle))
+		if ((isButtonDown && MouseDownInside) || (isTogglable && toggle))
 		{
 			textColour = Appearance.TextActive;
 			borderColour = Appearance.BorderActive;
@@ -114,21 +114,25 @@ void Button::Draw(const Point& screenPos)
 	}
 
 	bgColour = Appearance.BackgroundInactive;
-	g->fillrect(Position.X+1, Position.Y+1, Size.X-2, Size.Y-2, backgroundColour.Red, backgroundColour.Green, backgroundColour.Blue, backgroundColour.Alpha);
+	if (Appearance.BackgroundPulse)
+	{
+		backgroundColour.Alpha = uint8_t(backgroundColour.Alpha * ((std::sin(Engine::Ref().LastTick() / 1000 * std::numbers::pi * 2) + 1) / 2));
+	}
+	g->BlendFilledRect(RectSized(Position + Vec2{ 1, 1 }, Size - Vec2{ 2, 2 }), backgroundColour);
 	if(Appearance.Border == 1)
-		g->drawrect(Position.X, Position.Y, Size.X, Size.Y, borderColour.Red, borderColour.Green, borderColour.Blue, borderColour.Alpha);
+		g->BlendRect(RectSized(Position, Size), borderColour);
 	else
 	{
 		if(Appearance.Border.Top)
-			g->draw_line(Position.X, Position.Y, Position.X+Size.X-1, Position.Y, borderColour.Red, borderColour.Green, borderColour.Blue, borderColour.Alpha);
+			g->BlendLine(Position + Vec2{       0 ,        0 }, Position + Vec2{ Size.X-1,        0 }, borderColour);
 		if(Appearance.Border.Bottom)
-			g->draw_line(Position.X, Position.Y+Size.Y-1, Position.X+Size.X-1, Position.Y+Size.Y-1, borderColour.Red, borderColour.Green, borderColour.Blue, borderColour.Alpha);
+			g->BlendLine(Position + Vec2{       0 , Size.Y-1 }, Position + Vec2{ Size.X-1, Size.Y-1 }, borderColour);
 		if(Appearance.Border.Left)
-			g->draw_line(Position.X, Position.Y, Position.X, Position.Y+Size.Y-1, borderColour.Red, borderColour.Green, borderColour.Blue, borderColour.Alpha);
+			g->BlendLine(Position + Vec2{       0 ,        0 }, Position + Vec2{        0, Size.Y-1 }, borderColour);
 		if(Appearance.Border.Right)
-			g->draw_line(Position.X+Size.X-1, Position.Y, Position.X+Size.X-1, Position.Y+Size.Y-1, borderColour.Red, borderColour.Green, borderColour.Blue, borderColour.Alpha);
+			g->BlendLine(Position + Vec2{ Size.X-1,        0 }, Position + Vec2{ Size.X-1, Size.Y-1 }, borderColour);
 	}
-	g->drawtext(Position.X+textPosition.X, Position.Y+textPosition.Y, buttonDisplayText, textColour.Red, textColour.Green, textColour.Blue, textColour.Alpha);
+	g->BlendText(Position + textPosition, buttonDisplayText, textColour);
 
 	bool iconInvert = (backgroundColour.Blue + (3*backgroundColour.Green) + (2*backgroundColour.Red))>544?true:false;
 
@@ -141,7 +145,7 @@ void Button::Draw(const Point& screenPos)
 	}
 }
 
-void Button::OnMouseUnclick(int x, int y, unsigned int button)
+void Button::OnMouseClick(int x, int y, unsigned int button)
 {
 	if(button == 1)
 	{
@@ -172,17 +176,20 @@ void Button::OnMouseUp(int x, int y, unsigned int button)
 	isAltButtonDown = false;
 }
 
-void Button::OnMouseClick(int x, int y, unsigned int button)
+void Button::OnMouseDown(int x, int y, unsigned int button)
 {
-	if(!Enabled)
-		return;
-	if(button == 1)
+	if (MouseDownInside)
 	{
-		isButtonDown = true;
-	}
-	else if(button == 3)
-	{
-		isAltButtonDown = true;
+		if(!Enabled)
+			return;
+		if(button == 1)
+		{
+			isButtonDown = true;
+		}
+		else if(button == 3)
+		{
+			isAltButtonDown = true;
+		}
 	}
 }
 
@@ -191,8 +198,8 @@ void Button::OnMouseEnter(int x, int y)
 	isMouseInside = true;
 	if(!Enabled)
 		return;
-	if(actionCallback)
-		actionCallback->MouseEnterCallback(this);
+	if (actionCallback.mouseEnter)
+		actionCallback.mouseEnter();
 }
 
 void Button::OnMouseHover(int x, int y)
@@ -213,27 +220,16 @@ void Button::DoAction()
 {
 	if(!Enabled)
 		return;
-	if(actionCallback)
-		actionCallback->ActionCallback(this);
+	if (actionCallback.action)
+		actionCallback.action();
 }
 
 void Button::DoAltAction()
 {
 	if(!Enabled)
 		return;
-	if(actionCallback)
-		actionCallback->AltActionCallback(this);
-}
-
-void Button::SetActionCallback(ButtonAction * action)
-{
-	delete actionCallback;
-	actionCallback = action;
-}
-
-Button::~Button()
-{
-	delete actionCallback;
+	if (actionCallback.altAction)
+		actionCallback.altAction();
 }
 
 } /* namespace ui */

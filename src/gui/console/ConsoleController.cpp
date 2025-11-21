@@ -7,7 +7,7 @@
 
 #include "lua/CommandInterface.h"
 
-ConsoleController::ConsoleController(ControllerCallback * callback, CommandInterface * commandInterface):
+ConsoleController::ConsoleController(std::function<void ()> onDone_, CommandInterface * commandInterface):
 	HasDone(false)
 {
 	consoleModel = new ConsoleModel();
@@ -15,7 +15,7 @@ ConsoleController::ConsoleController(ControllerCallback * callback, CommandInter
 	consoleView->AttachController(this);
 	consoleModel->AddObserver(consoleView);
 
-	this->callback = callback;
+	onDone = onDone_;
 	this->commandInterface = commandInterface;
 }
 
@@ -59,8 +59,8 @@ void ConsoleController::PreviousCommand()
 void ConsoleController::Exit()
 {
 	consoleView->CloseActiveWindow();
-	if (callback)
-		callback->ControllerExit();
+	if (onDone)
+		onDone();
 	HasDone = true;
 }
 
@@ -71,9 +71,8 @@ ConsoleView * ConsoleController::GetView()
 
 ConsoleController::~ConsoleController()
 {
-	consoleView->CloseActiveWindow();
-	delete callback;
 	delete consoleModel;
+	consoleView->CloseActiveWindow();
 	delete consoleView;
 }
 

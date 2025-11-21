@@ -1,13 +1,18 @@
-#ifndef INFORMATIONMESSAGE_H_
-#define INFORMATIONMESSAGE_H_
-
+#pragma once
 #include "gui/interface/Window.h"
 
-class InformationMessage: public ui::Window {
-public:
-	InformationMessage(String title, String message, bool large);
-	void OnDraw() override;
-	virtual ~InformationMessage();
-};
+class InformationMessage : public ui::Window
+{
+	struct DismissCallback
+	{
+		std::function<void ()> dismiss;
+	};
 
-#endif /* INFORMATIONMESSAGE_H_ */
+	DismissCallback callback;
+
+public:
+	InformationMessage(String title, String message, bool large, DismissCallback callback_ = {});
+	virtual ~InformationMessage() = default;
+
+	void OnDraw() override;
+};

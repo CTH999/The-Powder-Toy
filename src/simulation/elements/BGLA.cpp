@@ -1,10 +1,10 @@
 #include "simulation/ElementCommon.h"
-//#TPT-Directive ElementClass Element_BGLA PT_BGLA 47
-Element_BGLA::Element_BGLA()
+
+void Element::Element_BGLA()
 {
 	Identifier = "DEFAULT_PT_BGLA";
 	Name = "BGLA";
-	Colour = PIXPACK(0x606060);
+	Colour = 0x606060_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_POWDERS;
 	Enabled = 1;
@@ -26,11 +26,10 @@ Element_BGLA::Element_BGLA()
 
 	Weight = 90;
 
-	Temperature = R_TEMP+0.0f	+273.15f;
 	HeatConduct = 150;
 	Description = "Broken Glass, heavy particles formed when glass breaks under pressure. Meltable. Bagels.";
 
-	Properties = TYPE_PART | PROP_HOT_GLOW;
+	Properties = TYPE_PART | PROP_NEUTPASS | PROP_PHOTPASS | PROP_HOT_GLOW | PROP_DEADLY;
 
 	LowPressure = IPL;
 	LowPressureTransition = NT;
@@ -40,8 +39,4 @@ Element_BGLA::Element_BGLA()
 	LowTemperatureTransition = NT;
 	HighTemperature = 1973.0f;
 	HighTemperatureTransition = PT_LAVA;
-
-	Update = NULL;
 }
-
-Element_BGLA::~Element_BGLA() {}

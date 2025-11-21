@@ -1,10 +1,10 @@
 #include "simulation/ElementCommon.h"
-//#TPT-Directive ElementClass Element_VOID PT_VOID 22
-Element_VOID::Element_VOID()
+
+void Element::Element_VOID()
 {
 	Identifier = "DEFAULT_PT_VOID";
 	Name = "VOID";
-	Colour = PIXPACK(0x790B0B);
+	Colour = 0x790B0B_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_SPECIAL;
 	Enabled = 1;
@@ -26,7 +26,6 @@ Element_VOID::Element_VOID()
 
 	Weight = 100;
 
-	Temperature = R_TEMP+0.0f	+273.15f;
 	HeatConduct = 251;
 	Description = "Hole, will drain away any particles.";
 
@@ -40,8 +39,5 @@ Element_VOID::Element_VOID()
 	LowTemperatureTransition = NT;
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
-
-	Update = NULL;
+	CtypeDraw = &Element::basicCtypeDraw;
 }
-
-Element_VOID::~Element_VOID() {}
