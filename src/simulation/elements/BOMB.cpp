@@ -1,10 +1,13 @@
 #include "simulation/ElementCommon.h"
-//#TPT-Directive ElementClass Element_BOMB PT_BOMB 129
-Element_BOMB::Element_BOMB()
+
+static int update(UPDATE_FUNC_ARGS);
+static int graphics(GRAPHICS_FUNC_ARGS);
+
+void Element::Element_BOMB()
 {
 	Identifier = "DEFAULT_PT_BOMB";
 	Name = "BOMB";
-	Colour = PIXPACK(0xFFF288);
+	Colour = 0xFFF288_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_EXPLOSIVE;
 	Enabled = 1;
@@ -26,7 +29,7 @@ Element_BOMB::Element_BOMB()
 
 	Weight = 30;
 
-	Temperature = R_TEMP-2.0f	+273.15f;
+	DefaultProperties.temp = R_TEMP - 2.0f + 273.15f;
 	HeatConduct = 29;
 	Description = "Bomb. Explodes and destroys all surrounding particles when it touches something.";
 
@@ -41,30 +44,30 @@ Element_BOMB::Element_BOMB()
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
 
-	Update = &Element_BOMB::update;
-	Graphics = &Element_BOMB::graphics;
+	Update = &update;
+	Graphics = &graphics;
 }
 
-//#TPT-Directive ElementHeader Element_BOMB static int update(UPDATE_FUNC_ARGS)
-int Element_BOMB::update(UPDATE_FUNC_ARGS)
+static int update(UPDATE_FUNC_ARGS)
 {
-	int r, rx, ry, rt, nb;
-
-	for (rx=-1; rx<2; rx++)
-		for (ry=-1; ry<2; ry++)
-			if (BOUNDS_CHECK && (rx || ry))
+	for (auto rx = -1; rx <= 1; rx++)
+	{
+		for (auto ry = -1; ry <= 1; ry++)
+		{
+			if (rx || ry)
 			{
-				r = pmap[y+ry][x+rx];
+				auto r = pmap[y+ry][x+rx];
 				if (!r)
 					continue;
-				rt = TYP(r);
+				auto rt = TYP(r);
 				if (rt!=PT_BOMB && rt!=PT_EMBR && rt!=PT_DMND && rt!=PT_CLNE && rt!=PT_PCLN && rt!=PT_BCLN && rt!=PT_VIBR)
 				{
 					int rad = 8, nt;
-					int nxi, nxj;
-					pmap[y][x] = 0;
-					for (nxj=-rad; nxj<=rad; nxj++)
-						for (nxi=-rad; nxi<=rad; nxi++)
+					sim->kill_part(i);
+					for (auto nxj=-rad; nxj<=rad; nxj++)
+					{
+						for (auto nxi=-rad; nxi<=rad; nxi++)
+						{
 							if ((pow((float)nxi,2))/(pow((float)rad,2))+(pow((float)nxj,2))/(pow((float)rad,2))<=1)
 							{
 								int ynxj = y + nxj, xnxi = x + nxi;
@@ -78,7 +81,7 @@ int Element_BOMB::update(UPDATE_FUNC_ARGS)
 									if (nt)
 										sim->kill_part(ID(pmap[ynxj][xnxi]));
 									sim->pv[(ynxj)/CELL][(xnxi)/CELL] += 0.1f;
-									nb = sim->create_part(-3, xnxi, ynxj, PT_EMBR);
+									auto nb = sim->create_part(-3, xnxi, ynxj, PT_EMBR);
 									if (nb!=-1)
 									{
 										parts[nb].tmp = 2;
@@ -87,35 +90,36 @@ int Element_BOMB::update(UPDATE_FUNC_ARGS)
 									}
 								}
 							}
-					for (nxj=-(rad+1); nxj<=(rad+1); nxj++)
-						for (nxi=-(rad+1); nxi<=(rad+1); nxi++)
+						}
+					}
+					for (auto nxj=-(rad+1); nxj<=(rad+1); nxj++)
+					{
+						for (auto nxi=-(rad+1); nxi<=(rad+1); nxi++)
+						{
 							if ((pow((float)nxi,2))/(pow((float)(rad+1),2))+(pow((float)nxj,2))/(pow((float)(rad+1),2))<=1 && !TYP(pmap[y+nxj][x+nxi]))
 							{
-								nb = sim->create_part(-3, x+nxi, y+nxj, PT_EMBR);
+								auto nb = sim->create_part(-3, x+nxi, y+nxj, PT_EMBR);
 								if (nb!=-1)
 								{
 									parts[nb].tmp = 0;
 									parts[nb].life = 50;
 									parts[nb].temp = MAX_TEMP;
-									parts[nb].vx = RNG::Ref().between(-20, 20);
-									parts[nb].vy = RNG::Ref().between(-20, 20);
+									parts[nb].vx = float(sim->rng.between(-20, 20));
+									parts[nb].vy = float(sim->rng.between(-20, 20));
 								}
 							}
-					sim->kill_part(i);
+						}
+					}
 					return 1;
 				}
 			}
+		}
+	}
 	return 0;
 }
 
-
-//#TPT-Directive ElementHeader Element_BOMB static int graphics(GRAPHICS_FUNC_ARGS)
-int Element_BOMB::graphics(GRAPHICS_FUNC_ARGS)
-
+static int graphics(GRAPHICS_FUNC_ARGS)
 {
 	*pixel_mode |= PMODE_FLARE;
 	return 1;
 }
-
-
-Element_BOMB::~Element_BOMB() {}

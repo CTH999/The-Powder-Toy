@@ -1,21 +1,21 @@
-#ifndef SEARCHCONTROLLER_H
-#define SEARCHCONTROLLER_H
-
+#pragma once
 #include "common/String.h"
+#include <functional>
+#include <memory>
 
-class ControllerCallback;
 class SaveInfo;
 class PreviewController;
 class PreviewController;
 class SearchView;
 class SearchModel;
+class VideoBuffer;
 class SearchController
 {
 private:
 	SearchModel * searchModel;
 	SearchView * searchView;
 	PreviewController * activePreview;
-	ControllerCallback * callback;
+	std::function<void ()> onDone;
 
 	double nextQueryTime;
 	String nextQuery;
@@ -24,10 +24,11 @@ private:
 	bool doRefresh;
 	void removeSelectedC();
 	void unpublishSelectedC(bool publish);
+
+	void OpenSaveDone();
 public:
-	class OpenCallback;
 	bool HasExited;
-	SearchController(ControllerCallback * callback = NULL);
+	SearchController(std::function<void ()> onDone = nullptr);
 	~SearchController();
 	SearchView * GetView() { return searchView; }
 	void Exit();
@@ -36,20 +37,19 @@ public:
 	void Refresh();
 	void SetPage(int page);
 	void SetPageRelative(int offset);
+	void ChangePeriod(int period);
 	void ChangeSort();
 	void ShowOwn(bool show);
 	void ShowFavourite(bool show);
 	void Selected(int saveID, bool selected);
+	void SelectAllSaves();
 	void InstantOpen(bool instant);
-	void OpenSave(int saveID);
-	void OpenSave(int saveID, int saveDate);
+	void OpenSave(int saveID, int saveDate, std::unique_ptr<VideoBuffer> thumbnail);
 	void Update();
 	void ClearSelection();
 	void RemoveSelected();
 	void UnpublishSelected(bool publish);
 	void FavouriteSelected();
-	void ReleaseLoadedSave();
-	SaveInfo * GetLoadedSave();
+	const SaveInfo *GetLoadedSave() const;
+	std::unique_ptr<SaveInfo> TakeLoadedSave();
 };
-
-#endif // SEARCHCONTROLLER_H

@@ -1,6 +1,4 @@
-#ifndef TASK_H_
-#define TASK_H_
-
+#pragma once
 #include "common/String.h"
 #include <thread>
 #include <mutex>
@@ -49,5 +47,3 @@ protected:
 	virtual void notifyStatusMain();
 	virtual void notifyDoneMain();
 };
-
-#endif /* TASK_H_ */

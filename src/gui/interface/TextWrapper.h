@@ -2,7 +2,6 @@
 
 #include "common/String.h"
 #include "Point.h"
-#include "font.h"
 
 #include <vector>
 
@@ -28,6 +27,7 @@ namespace ui
 			Index index;
 		};
 		int wrapped_lines;
+		int wrappedWidth;
 		std::vector<clickmap_region> regions;
 
 	public:
@@ -41,6 +41,11 @@ namespace ui
 			return wrapped_text;
 		}
 
+		int WrappedLines() const
+		{
+			return wrapped_lines;
+		}
+
 		Index IndexBegin() const
 		{
 			return Index{ 0, 0, 0 };
@@ -49,6 +54,11 @@ namespace ui
 		Index IndexEnd() const
 		{
 			return Index{ raw_text_size, (int)wrapped_text.size(), clear_text_size };
+		}
+
+		int WrappedWidth() const
+		{
+			return wrappedWidth;
 		}
 	};
 }

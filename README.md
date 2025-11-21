@@ -1,4 +1,4 @@
-The Powder Toy - February 2019
+The Powder Toy - February 2025
 ==========================
 
 Get the latest version [from the Powder Toy website](https://powdertoy.co.uk/Download.html).
@@ -10,42 +10,51 @@ Have you ever wanted to blow something up? Or maybe you always dreamt of operati
 
 The Powder Toy is a free physics sandbox game, which simulates air pressure and velocity, heat, gravity and a countless number of interactions between different substances! The game provides you with various building materials, liquids, gases and electronic components which can be used to construct complex machines, guns, bombs, realistic terrains and almost anything else. You can then mine them and watch cool explosions, add intricate wirings, play with little stickmen or operate your machine. You can browse and play thousands of different saves made by the community or upload your own – we welcome your creations!
 
-There is a Lua API – you can automate your work or even make plugins for the game. The Powder Toy is free and the source code is distributed under the GNU General Public License, so you can modify the game yourself or help with development. TPT is compiled using scons.
+There is a Lua API – you can automate your work or even make plugins for the game. The Powder Toy is free and the source code is distributed under the GNU General Public License, so you can modify the game yourself or help with development.
 
 Build instructions
 ===========================================================================
 
-    sudo apt-get install build-essential libsdl2-dev libbz2-dev zlib1g-dev liblua5.1.0-dev git scons libfftw3-dev libcurl4-openssl-dev
-    scons
+See the _Powder Toy Development Help_ section [on the main page of the wiki](https://powdertoy.co.uk/Wiki/W/Main_Page.html).
 
-For a list of flags for `scons`, see [the Powder Toy wiki](https://powdertoy.co.uk/Wiki/W/Scons_command_line_flags.html).
-
-Thanks
+Special Thanks
 ===========================================================================
 
-* Stanislaw K Skowronek - Designed the original
-* Simon Robertshaw
+* Stanislaw K Skowronek - Designed the original Powder Toy
+* Simon Robertshaw - Wrote the website, current server owner
 * Skresanov Savely
-* cracker64
+* Pilihp64
 * Catelite
-* Bryan Hoyle
+* Victoria Hoyle
 * Nathan Cousins
 * jacksonmj
 * Felix Wallin
 * Lieuwe Mosch
 * Anthony Boot
-* Matthew "me4502"
+* Me4502
 * MaksProg
 * jacob1
 * mniip
 * LBPHacker
 
+Libraries and other assets used
+===========================================================================
+
+* [bzip2](http://www.bzip.org/)
+* [FFTW](http://fftw.org/)
+* [JsonCpp](https://github.com/open-source-parsers/jsoncpp)
+* [libcurl](https://curl.se/libcurl/)
+* [libpng](http://www.libpng.org/pub/png/libpng.html)
+* [Lua](https://www.lua.org/)
+* [LuaJIT](https://luajit.org/)
+* [Mallangche](https://github.com/JammPark/Mallangche)
+* [mbedtls](https://www.trustedfirmware.org/projects/mbed-tls/)
+* [SDL](https://libsdl.org/)
 
 Instructions
 ===========================================================================
 
 Click on the elements with the mouse and draw in the field, like in MS Paint. The rest of the game is learning what happens next.
-
 
 Controls
 ===========================================================================
@@ -71,6 +80,7 @@ Controls
 | I                       | Invert Pressure and Velocity map                                |
 | W                       | Cycle gravity modes (use with Ctrl when STK2 is out)            |
 | Y                       | Cycle air modes                                                 |
+| Ctrl + E                | Cycle edge modes                                                |
 | B                       | Enter decoration editor menu                                    |
 | Ctrl + B                | Toggle decorations on/off                                       |
 | N                       | Toggle Newtonian Gravity on/off                                 |
@@ -96,17 +106,22 @@ Controls
 | Shift + R               | Horizontal mirror for selected area when pasting stamps         |
 | Ctrl + Shift + R        | Vertical mirror for selected area when pasting stamps           |
 | R                       | Rotate selected area counterclockwise when pasting stamps       |
-
-
+| F11                     | Toggle fullscreen                                               |
 
 Command Line
 ---------------------------------------------------------------------------
 
-| Command               | Description                                      | Example                           |
-| --------------------- | ------------------------------------------------ | --------------------------------- |
-| `scale:SIZE`          | Change window scale factor                       | `scale:2`                         |
-| `kiosk`               | Fullscreen mode                                  |                                   |
-| `proxy:SERVER[:PORT]` | Proxy server to use                              | `proxy:wwwcache.lancs.ac.uk:8080` |
-| `open FILE`           | Opens the file as a stamp or game save           |                                   |
-| `ddir DIRECTORY`      | Directory used for saving stamps and preferences |                                   |
-| `ptsave:SAVEID`       | Open online save, used by ptsave: URLs           | `ptsave:2198`                     |
+| Command               | Description                                      | Example                                     |
+| --------------------- | ------------------------------------------------ | --------------------------------------------|
+| `scale:SIZE`          | Change window scale factor                       | `scale:2`                                   |
+| `kiosk`               | Fullscreen mode                                  |                                             |
+| `proxy:SERVER[:PORT]` | Proxy server to use                              | `proxy:wwwcache.lancs.ac.uk:8080`           |
+| `open FILE`           | Opens the file as a stamp or game save           |                                             |
+| `ddir DIRECTORY`      | Directory used for saving stamps and preferences |                                             |
+| `ptsave:SAVEID`       | Open online save, used by ptsave: URLs           | `ptsave:2198`                               |
+| `disable-network`     | Disables internet connections                    |                                             |
+| `disable-bluescreen`  | Disable bluescreen handler                       |                                             |
+| `redirect`            | Redirects output to stdout.txt / stderr.txt      |                                             |
+| `console`             | Redirects output to a new console on Windows     |                                             |
+| `cafile:CAFILE`       | Set certificate bundle path                      | `cafile:/etc/ssl/certs/ca-certificates.crt` |
+| `capath:CAPATH`       | Set certificate directory path                   | `capath:/etc/ssl/certs`                     |

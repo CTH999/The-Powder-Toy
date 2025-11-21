@@ -1,10 +1,15 @@
 #include "simulation/ElementCommon.h"
-//#TPT-Directive ElementClass Element_CRAY PT_CRAY 167
-Element_CRAY::Element_CRAY()
+#include "FILT.h"
+
+static int update(UPDATE_FUNC_ARGS);
+static bool ctypeDraw(CTYPEDRAW_FUNC_ARGS);
+static unsigned int wavelengthToDecoColour(int wavelength);
+
+void Element::Element_CRAY()
 {
 	Identifier = "DEFAULT_PT_CRAY";
 	Name = "CRAY";
-	Colour = PIXPACK(0xBBFF00);
+	Colour = 0xBBFF00_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_ELEC;
 	Enabled = 1;
@@ -26,11 +31,11 @@ Element_CRAY::Element_CRAY()
 
 	Weight = 100;
 
-	Temperature = R_TEMP+0.0f +273.15f;
 	HeatConduct = 0;
 	Description = "Particle Ray Emitter. Creates a beam of particles set by its ctype, with a range set by tmp.";
 
 	Properties = TYPE_SOLID;
+	CarriesTypeIn = 1U << FIELD_CTYPE;
 
 	LowPressure = IPL;
 	LowPressureTransition = NT;
@@ -41,38 +46,42 @@ Element_CRAY::Element_CRAY()
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
 
-	Update = &Element_CRAY::update;
-	CtypeDraw = &Element_CRAY::ctypeDraw;
+	Update = &update;
+	CtypeDraw = &ctypeDraw;
 }
 
-//#TPT-Directive ElementHeader Element_CRAY static int update(UPDATE_FUNC_ARGS)
-int Element_CRAY::update(UPDATE_FUNC_ARGS)
+static int update(UPDATE_FUNC_ARGS)
 {
+	auto &sd = SimulationData::CRef();
+	auto &elements = sd.elements;
 	int nxx, nyy, docontinue, nxi, nyi;
 	// set ctype to things that touch it if it doesn't have one already
-	if (parts[i].ctype<=0 || !sim->elements[TYP(parts[i].ctype)].Enabled)
+	if (parts[i].ctype<=0 || !elements[TYP(parts[i].ctype)].Enabled)
 	{
 		for (int rx = -1; rx <= 1; rx++)
+		{
 			for (int ry = -1; ry <= 1; ry++)
-				if (BOUNDS_CHECK)
+			{
+				int r = sim->photons[y+ry][x+rx];
+				if (!r)
+					r = pmap[y+ry][x+rx];
+				if (!r)
+					continue;
+				if (TYP(r)!=PT_CRAY && TYP(r)!=PT_PSCN && TYP(r)!=PT_INST && TYP(r)!=PT_METL && TYP(r)!=PT_SPRK && TYP(r)<PT_NUM)
 				{
-					int r = sim->photons[y+ry][x+rx];
-					if (!r)
-						r = pmap[y+ry][x+rx];
-					if (!r)
-						continue;
-					if (TYP(r)!=PT_CRAY && TYP(r)!=PT_PSCN && TYP(r)!=PT_INST && TYP(r)!=PT_METL && TYP(r)!=PT_SPRK && TYP(r)<PT_NUM)
-					{
-						parts[i].ctype = TYP(r);
-						parts[i].temp = parts[ID(r)].temp;
-					}
+					parts[i].ctype = TYP(r);
+					parts[i].temp = parts[ID(r)].temp;
 				}
+			}
+		}
 	}
 	else
 	{
 		for (int rx =-1; rx <= 1; rx++)
+		{
 			for (int ry = -1; ry <= 1; ry++)
-				if (BOUNDS_CHECK && (rx || ry))
+			{
+				if (rx || ry)
 				{
 					int r = pmap[y+ry][x+rx];
 					if (!r)
@@ -108,7 +117,7 @@ int Element_CRAY::update(UPDATE_FUNC_ARGS)
 									colored = 0xFF000000;
 								else if (parts[ID(r)].tmp==0)
 								{
-									colored = wavelengthToDecoColour(Element_FILT::getWavelengths(&parts[ID(r)]));
+									colored = wavelengthToDecoColour(Element_FILT_getWavelengths(&parts[ID(r)]));
 								}
 								else if (colored==0xFF000000)
 									colored = 0;
@@ -127,11 +136,13 @@ int Element_CRAY::update(UPDATE_FUNC_ARGS)
 						}
 					}
 				}
+			}
+		}
 	}
 	return 0;
 }
-//#TPT-Directive ElementHeader Element_CRAY static unsigned int wavelengthToDecoColour(int wavelength)
-unsigned int Element_CRAY::wavelengthToDecoColour(int wavelength)
+
+static unsigned int wavelengthToDecoColour(int wavelength)
 {
 	int colr = 0, colg = 0, colb = 0, x;
 	for (x=0; x<12; x++) {
@@ -155,9 +166,10 @@ unsigned int Element_CRAY::wavelengthToDecoColour(int wavelength)
 	return (255<<24) | (colr<<16) | (colg<<8) | colb;
 }
 
-//#TPT-Directive ElementHeader Element_CRAY static bool ctypeDraw(CTYPEDRAW_FUNC_ARGS)
-bool Element_CRAY::ctypeDraw(CTYPEDRAW_FUNC_ARGS)
+static bool ctypeDraw(CTYPEDRAW_FUNC_ARGS)
 {
+	auto &sd = SimulationData::CRef();
+	auto &elements = sd.elements;
 	if (!Element::ctypeDrawVInCtype(CTYPEDRAW_FUNC_SUBCALL_ARGS))
 	{
 		return false;
@@ -166,8 +178,6 @@ bool Element_CRAY::ctypeDraw(CTYPEDRAW_FUNC_ARGS)
 	{
 		sim->parts[i].ctype |= PMAPID(30);
 	}
-	sim->parts[i].temp = sim->elements[t].Temperature;
+	sim->parts[i].temp = elements[t].DefaultProperties.temp;
 	return true;
 }
-
-Element_CRAY::~Element_CRAY() {}

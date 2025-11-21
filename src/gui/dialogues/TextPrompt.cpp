@@ -6,26 +6,10 @@
 #include "gui/interface/Textbox.h"
 
 #include "gui/Style.h"
-#include "PowderToy.h"
 
 #include "graphics/Graphics.h"
 
-class CloseAction: public ui::ButtonAction
-{
-public:
-	TextPrompt * prompt;
-	TextPrompt::DialogueResult result;
-	CloseAction(TextPrompt * prompt_, TextPrompt::DialogueResult result_) { prompt = prompt_; result = result_; }
-	void ActionCallback(ui::Button * sender) override
-	{
-		prompt->CloseActiveWindow();
-		if(prompt->callback)
-			prompt->callback->TextCallback(result, prompt->textField->GetText());
-		prompt->SelfDestruct(); //TODO: Fix component disposal
-	}
-};
-
-TextPrompt::TextPrompt(String title, String message, String text, String placeholder, bool multiline, TextDialogueCallback * callback_):
+TextPrompt::TextPrompt(String title, String message, String text, String placeholder, bool multiline, TextDialogueCallback callback_):
 	ui::Window(ui::Point(-1, -1), ui::Point(200, 65)),
 	callback(callback_)
 {
@@ -66,7 +50,12 @@ TextPrompt::TextPrompt(String title, String message, String text, String placeho
 	cancelButton->Appearance.HorizontalAlign = ui::Appearance::AlignLeft;
 	cancelButton->Appearance.VerticalAlign = ui::Appearance::AlignMiddle;
 	cancelButton->Appearance.BorderInactive = ui::Colour(200, 200, 200);
-	cancelButton->SetActionCallback(new CloseAction(this, ResultCancel));
+	cancelButton->SetActionCallback({ [this] {
+		CloseActiveWindow();
+		if (callback.cancel)
+			callback.cancel();
+		SelfDestruct();
+	} });
 	AddComponent(cancelButton);
 	SetCancelButton(cancelButton);
 
@@ -74,45 +63,22 @@ TextPrompt::TextPrompt(String title, String message, String text, String placeho
 	okayButton->Appearance.HorizontalAlign = ui::Appearance::AlignRight;
 	okayButton->Appearance.VerticalAlign = ui::Appearance::AlignMiddle;
 	okayButton->Appearance.TextInactive = style::Colour::WarningTitle;
-	okayButton->SetActionCallback(new CloseAction(this, ResultOkay));
+	okayButton->SetActionCallback({ [this] {
+		CloseActiveWindow();
+		if (callback.text)
+			callback.text(textField->GetText());
+		SelfDestruct();
+	} });
 	AddComponent(okayButton);
 	SetOkayButton(okayButton);
 
 	MakeActiveWindow();
 }
 
-String TextPrompt::Blocking(String title, String message, String text, String placeholder, bool multiline)
-{
-	String returnString = "";
-
-	class BlockingTextCallback: public TextDialogueCallback {
-		String & outputString;
-	public:
-		BlockingTextCallback(String & output) : outputString(output) {}
-		void TextCallback(TextPrompt::DialogueResult result, String resultText) override {
-			if(result == ResultOkay)
-				outputString = resultText;
-			else
-				outputString = "";
-			ui::Engine::Ref().Break();
-		}
-		virtual ~BlockingTextCallback() { }
-	};
-	new TextPrompt(title, message, text, placeholder, multiline, new BlockingTextCallback(returnString));
-	EngineProcess();
-
-	return returnString;
-}
-
 void TextPrompt::OnDraw()
 {
 	Graphics * g = GetGraphics();
 
-	g->clearrect(Position.X-2, Position.Y-2, Size.X+3, Size.Y+3);
-	g->drawrect(Position.X, Position.Y, Size.X, Size.Y, 200, 200, 200, 255);
+	g->DrawFilledRect(RectSized(Position - Vec2{ 1, 1 }, Size + Vec2{ 2, 2 }), 0x000000_rgb);
+	g->DrawRect(RectSized(Position, Size), 0xC8C8C8_rgb);
 }
-
-TextPrompt::~TextPrompt() {
-	delete callback;
-}
-

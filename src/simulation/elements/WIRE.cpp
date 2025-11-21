@@ -1,10 +1,13 @@
 #include "simulation/ElementCommon.h"
-//#TPT-Directive ElementClass Element_WIRE PT_WIRE 156
-Element_WIRE::Element_WIRE()
+
+static int update(UPDATE_FUNC_ARGS);
+static int graphics(GRAPHICS_FUNC_ARGS);
+
+void Element::Element_WIRE()
 {
 	Identifier = "DEFAULT_PT_WIRE";
 	Name = "WWLD";
-	Colour = PIXPACK(0xFFCC00);
+	Colour = 0xFFCC00_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_ELEC;
 	Enabled = 1;
@@ -26,7 +29,6 @@ Element_WIRE::Element_WIRE()
 
 	Weight = 100;
 
-	Temperature = R_TEMP+0.0f +273.15f;
 	HeatConduct = 250;
 	Description = "WireWorld wires, conducts based on a set of GOL-like rules.";
 
@@ -41,14 +43,13 @@ Element_WIRE::Element_WIRE()
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
 
-	Update = &Element_WIRE::update;
-	Graphics = &Element_WIRE::graphics;
+	Update = &update;
+	Graphics = &graphics;
 }
 
-//#TPT-Directive ElementHeader Element_WIRE static int update(UPDATE_FUNC_ARGS)
-int Element_WIRE::update(UPDATE_FUNC_ARGS)
+static int update(UPDATE_FUNC_ARGS)
 {
-	int r,rx,ry,count=0;
+	int count=0;
 	/*
 	  0:  wire
 	  1:  spark head
@@ -66,12 +67,13 @@ int Element_WIRE::update(UPDATE_FUNC_ARGS)
 	{
 		parts[i].ctype=0;
 	}
-	for (rx=-1; rx<2; rx++)
-		for (ry=-1; ry<2; ry++)
+	for (auto rx = -1; rx <= 1; rx++)
+	{
+		for (auto ry = -1; ry <= 1; ry++)
 		{
-			if (BOUNDS_CHECK && (rx || ry))
+			if (rx || ry)
 			{
-				r = pmap[y+ry][x+rx];
+				auto r = pmap[y+ry][x+rx];
 				if (!r)
 					continue;
 				if (TYP(r)==PT_SPRK && parts[ID(r)].life==3 && parts[ID(r)].ctype==PT_PSCN)
@@ -85,16 +87,13 @@ int Element_WIRE::update(UPDATE_FUNC_ARGS)
 					count++;
 			}
 		}
+	}
 	if (count==1 || count==2)
 		parts[i].ctype=1;
 	return 0;
 }
 
-
-
-//#TPT-Directive ElementHeader Element_WIRE static int graphics(GRAPHICS_FUNC_ARGS)
-int Element_WIRE::graphics(GRAPHICS_FUNC_ARGS)
-
+static int graphics(GRAPHICS_FUNC_ARGS)
 {
 	if (cpart->ctype==0)
 	{
@@ -121,6 +120,3 @@ int Element_WIRE::graphics(GRAPHICS_FUNC_ARGS)
 	}
 	return 0;
 }
-
-
-Element_WIRE::~Element_WIRE() {}

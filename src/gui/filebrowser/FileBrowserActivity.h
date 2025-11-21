@@ -1,18 +1,14 @@
 #pragma once
 
-#include <vector>
 #include "common/String.h"
 #include "Activity.h"
 #include "tasks/TaskListener.h"
 
+#include <vector>
+#include <functional>
+#include <memory>
+
 class SaveFile;
-class FileSelectedCallback
-{
-public:
-	FileSelectedCallback() {}
-	virtual  ~FileSelectedCallback() {}
-	virtual void FileSelected(SaveFile* file) {}
-};
 
 namespace ui
 {
@@ -24,14 +20,19 @@ namespace ui
 class LoadFilesTask;
 class FileBrowserActivity: public TaskListener, public WindowActivity
 {
+	using OnSelected = std::function<void (std::unique_ptr<SaveFile>)>;
+
 	LoadFilesTask * loadFiles;
-	FileSelectedCallback * callback;
+	OnSelected onSelected;
 	ui::ScrollPanel * itemList;
 	ui::Label * infoText;
-	std::vector<SaveFile*> files;
+	std::vector<std::unique_ptr<SaveFile>> files;
+	bool createButtons = false;
 	std::vector<ui::Component*> components;
 	std::vector<ui::Component*> componentsQueue;
 	ByteString directory;
+	bool hasQueuedSearch;
+	ByteString queuedSearch;
 
 	ui::ProgressBar * progressBar;
 
@@ -40,22 +41,21 @@ class FileBrowserActivity: public TaskListener, public WindowActivity
 	int fileX, fileY;
 	int buttonWidth, buttonHeight, buttonAreaWidth, buttonAreaHeight, buttonXOffset, buttonYOffset;
 
-
-	class SearchAction;
 	void populateList();
 	void cleanup();
 public:
-	FileBrowserActivity(ByteString directory, FileSelectedCallback * callback);
+	FileBrowserActivity(ByteString directory, OnSelected onSelected = nullptr);
+	virtual ~FileBrowserActivity();
+	
 	void OnDraw() override;
-	void OnTick(float dt) override;
+	void OnTick() override;
 	void OnTryExit(ExitMethod method) override;
 	void OnMouseDown(int x, int y, unsigned button) override;
 	void loadDirectory(ByteString directory, ByteString search);
-	void SelectSave(SaveFile * file);
-	void DeleteSave(SaveFile * file);
-	void RenameSave(SaveFile * file);
+	void SelectSave(int index);
+	void DeleteSave(int index);
+	void RenameSave(int index);
 	void DoSearch(ByteString search);
-	virtual ~FileBrowserActivity();
 
 	void NotifyDone(Task * task) override;
 	void NotifyError(Task * task) override;

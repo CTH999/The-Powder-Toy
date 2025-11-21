@@ -1,5 +1,4 @@
 #pragma once
-
 #include "gui/interface/Window.h"
 
 class Activity
