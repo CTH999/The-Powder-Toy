@@ -52,7 +52,7 @@ inline ByteString IntroText()
 	      "Shift+drag will create straight lines of particles.\n"
 	      "Ctrl+drag will result in filled rectangles.\n"
 	      "Ctrl+Shift+click will flood-fill a closed area.\n"
-	      "Use the mouse scroll wheel, or '[' and ']', to change the tool size for particles.\n"
+	      "Use the mouse scroll wheel, or '[' and ']', to change the tool size for particles. Use 'Tab' to cycle brushes.\n"
 	      "Middle click or Alt+Click to \"sample\" the particles.\n"
 	      "Ctrl+Z will act as Undo.\n"
 	      "\n\boUse 'Z' for a zoom tool. Click to make the drawable zoom window stay around. Use the wheel to change the zoom strength.\n"
