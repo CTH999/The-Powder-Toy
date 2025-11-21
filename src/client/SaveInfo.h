@@ -1,10 +1,9 @@
-#ifndef SAVE_H
-#define SAVE_H
-
-#include <vector>
-#include <string>
-#include <stdlib.h>
-#include <iostream>
+#pragma once
+#include "common/String.h"
+#include "User.h"
+#include <list>
+#include <memory>
+#include <ctime>
 
 class GameSave;
 
@@ -13,66 +12,63 @@ class SaveInfo
 private:
 public:
 	int id;
-	int date;
+	time_t createdDate;
+	time_t updatedDate;
 	int votesUp, votesDown;
+	int vote;
 	bool Favourite;
 	int Comments;
 	int Views;
 	int Version;
+	User::Elevation authorElevation;
+	bool authorIsBanned;
 
-	GameSave * gameSave;
+	ByteString userName;
 
-	SaveInfo(SaveInfo & save);
-
-	SaveInfo(int _id, int _date, int _votesUp, int _votesDown, std::string _userName, std::string _name);
-
-	SaveInfo(int _id, int date_, int _votesUp, int _votesDown, int _vote, std::string _userName, std::string _name, std::string description_, bool published_, std::vector<std::string> tags);
-
-	~SaveInfo();
-
-	std::string userName;
-	std::string name;
-
-	std::string Description;
-
-	std::vector<std::string> tags;
-
-	int vote;
-
+	String name;
+	String Description;
 	bool Published;
 
-	void SetName(std::string name);
-	std::string GetName();
+	std::list<ByteString> tags;
+	std::unique_ptr<GameSave> gameSave;
 
-	void SetDescription(std::string description);
-	std::string GetDescription();
+	SaveInfo(int _id, time_t _createdDate, time_t _updatedDate, int _votesUp, int _votesDown, ByteString _userName, String _name);
+
+	SaveInfo(int _id, time_t _createdDate, time_t _updatedDate, int _votesUp, int _votesDown, int _vote, ByteString _userName, String _name, String description_, bool published_, std::list<ByteString> tags);
+
+	void SetName(String name);
+	const String &GetName() const;
+
+	void SetDescription(String description);
+	const String &GetDescription() const;
 
 	void SetPublished(bool published);
-	bool GetPublished();
+	bool GetPublished() const;
 
-	void SetUserName(std::string userName);
-	std::string GetUserName();
+	void SetUserName(ByteString userName);
+	const ByteString &GetUserName() const;
 
 	void SetID(int id);
-	int GetID();
+	int GetID() const;
 
 	void SetVote(int vote);
-	int GetVote();
+	int GetVote() const;
 
 	void SetVotesUp(int votesUp);
-	int GetVotesUp();
+	int GetVotesUp() const;
 
 	void SetVotesDown(int votesDown);
-	int GetVotesDown();
+	int GetVotesDown() const;
 
 	void SetVersion(int version);
-	int GetVersion();
+	int GetVersion() const;
 
-	void SetTags(std::vector<std::string> tags);
-	std::vector<std::string> GetTags();
+	void SetTags(std::list<ByteString> tags);
+	std::list<ByteString> GetTags() const;
 
-	GameSave * GetGameSave();
-	void SetGameSave(GameSave * gameSave);
+	const GameSave *GetGameSave() const;
+	std::unique_ptr<GameSave> TakeGameSave();
+	void SetGameSave(std::unique_ptr<GameSave> newGameSave);
+
+	std::unique_ptr<SaveInfo> CloneInfo() const;
 };
-
-#endif // SAVE_H

@@ -1,122 +1,74 @@
-#if defined(RENDERER)
-
-#include <time.h>
+#include "graphics/Graphics.h"
+#include "graphics/VideoBuffer.h"
+#include "graphics/Renderer.h"
+#include "common/String.h"
+#include "common/tpt-rand.h"
+#include "Format.h"
+#include "gui/interface/Engine.h"
+#include "client/GameSave.h"
+#include "simulation/Simulation.h"
+#include "simulation/SimulationData.h"
+#include "common/platform/Platform.h"
+#include <ctime>
 #include <iostream>
-#include <sstream>
-#include <string>
 #include <fstream>
 #include <vector>
 
-#include "Config.h"
-#include "Format.h"
-#include "interface/Engine.h"
-#include "graphics/Graphics.h"
-#include "graphics/Renderer.h"
-
-#include "client/GameSave.h"
-#include "simulation/Simulation.h"
-
-
-void EngineProcess() {}
-void ClipboardPush(char * text) {}
-char * ClipboardPull() {}
-
-void readFile(std::string filename, std::vector<char> & storage)
-{
-	std::ifstream fileStream;
-	fileStream.open(std::string(filename).c_str(), std::ios::binary);
-	if(fileStream.is_open())
-	{
-		fileStream.seekg(0, std::ios::end);
-		size_t fileSize = fileStream.tellg();
-		fileStream.seekg(0);
-
-		unsigned char * tempData = new unsigned char[fileSize];
-		fileStream.read((char *)tempData, fileSize);
-		fileStream.close();
-
-		std::vector<unsigned char> fileData;
-		storage.clear();
-		storage.insert(storage.end(), tempData, tempData+fileSize);
-		delete[] tempData;
-	}
-}
-
-void writeFile(std::string filename, std::vector<char> & fileData)
-{
-	std::ofstream fileStream;
-	fileStream.open(std::string(filename).c_str(), std::ios::binary);
-	if(fileStream.is_open())
-	{
-		fileStream.write(&fileData[0], fileData.size());
-		fileStream.close();
-	}
-}
-
 int main(int argc, char *argv[])
-{	
-	ui::Engine * engine;
-	std::string outputPrefix, inputFilename;
-	std::vector<char> inputFile;
-	std::string ppmFilename, ptiFilename, ptiSmallFilename, pngFilename, pngSmallFilename;
-	std::vector<char> ppmFile, ptiFile, ptiSmallFile, pngFile, pngSmallFile;
+{
+	if (!argv[1] || !argv[2]) {
+		std::cout << "Usage: " << argv[0] << " <inputFilename> <outputPrefix>" << std::endl;
+		return 1;
+	}
+	auto inputFilename = ByteString(argv[1]);
+	auto outputFilename = ByteString(argv[2]) + ".png";
 
-	inputFilename = std::string(argv[1]);
-	outputPrefix = std::string(argv[2]);
+	auto simulationData = std::make_unique<SimulationData>();
 
-	ppmFilename = outputPrefix+".ppm";
-	ptiFilename = outputPrefix+".pti";
-	ptiSmallFilename = outputPrefix+"-small.pti";
-	pngFilename = outputPrefix+".png";
-	pngSmallFilename = outputPrefix+"-small.png";
+	std::vector<char> fileData;
+	if (!Platform::ReadFile(fileData, inputFilename))
+	{
+		return 1;
+	}
 
-	readFile(inputFilename, inputFile);
-
-	ui::Engine::Ref().g = new Graphics();
-	
-	engine = &ui::Engine::Ref();
-	engine->Begin(XRES+BARSIZE, YRES+MENUSIZE);
-
-	GameSave * gameSave = new GameSave(inputFile);
+	std::unique_ptr<GameSave> gameSave;
+	try
+	{
+		gameSave = std::make_unique<GameSave>(fileData, false);
+	}
+	catch (ParseException &e)
+	{
+		//Render the save again later or something? I don't know
+		if (ByteString(e.what()).FromUtf8() == "Save from newer version")
+			throw e;
+	}
 
 	Simulation * sim = new Simulation();
-	Renderer * ren = new Renderer(ui::Engine::Ref().g, sim);
+	Renderer * ren = new Renderer();
+	ren->sim = sim;
 
-	sim->Load(gameSave);
-
-
-	//Render save
-	ren->decorations_enable = true;
-	ren->blackDecorations = true;
-
-	int frame = 15;
-	while(frame)
+	if (gameSave)
 	{
-		frame--;
-		ren->render_parts();
-		ren->render_fire();
-		ren->clearScreen(1.0f);
+		sim->Load(gameSave.get(), true, { 0, 0 });
+
+		//Render save
+		RendererSettings rendererSettings;
+		rendererSettings.decorationLevel = RendererSettings::decorationAntiClickbait;
+		ren->ApplySettings(rendererSettings);
+		ren->ClearAccumulation();
+		ren->Clear();
+		ren->ApproximateAccumulation();
+		ren->RenderSimulation();
+	}
+	else
+	{
+		ren->Clear();
+		int w = Graphics::TextSize("Save file invalid").X + 15, x = (XRES-w)/2, y = (YRES-24)/2;
+		ren->DrawRect(RectSized(Vec2{ x, y }, Vec2{ w, 24 }), 0xC0C0C0_rgb);
+		ren->BlendText({ x+8, y+8 }, "Save file invalid", 0xC0C0F0_rgb .WithAlpha(255));
 	}
 
-	ren->RenderBegin();
-	ren->RenderEnd();
-
-	VideoBuffer screenBuffer = ren->DumpFrame();
-	//ppmFile = format::VideoBufferToPPM(screenBuffer);
-	ptiFile = format::VideoBufferToPTI(screenBuffer);
-	pngFile = format::VideoBufferToPNG(screenBuffer);
-
-	screenBuffer.Resize(1.0f/3.0f, true);
-	ptiSmallFile = format::VideoBufferToPTI(screenBuffer);
-	pngSmallFile = format::VideoBufferToPNG(screenBuffer);
-
-
-
-	//writeFile(ppmFilename, ppmFile);
-	writeFile(ptiFilename, ptiFile);
-	writeFile(ptiSmallFilename, ptiSmallFile);
-	writeFile(pngFilename, pngFile);
-	writeFile(pngSmallFilename, pngSmallFile);
+	auto &video = ren->GetVideo();
+	if (auto data = VideoBuffer(video.data(), RES, video.Size().X).ToPNG())
+		Platform::WriteFile(*data, outputFilename);
 }
-
-#endif

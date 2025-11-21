@@ -1,12 +1,6 @@
-/*
- * ClientListener.h
- *
- *  Created on: Jun 19, 2012
- *      Author: Simon
- */
-
-#ifndef CLIENTLISTENER_H_
-#define CLIENTLISTENER_H_
+#pragma once
+#include "common/String.h"
+#include "client/ServerNotification.h"
 
 class Client;
 class ClientListener
@@ -18,8 +12,6 @@ public:
 	virtual void NotifyUpdateAvailable(Client * sender) {}
 	virtual void NotifyAuthUserChanged(Client * sender) {}
 	virtual void NotifyMessageOfTheDay(Client * sender) {}
-	virtual void NotifyNewNotification(Client * sender, std::pair<std::string, std::string> notification) {}
+	virtual void NotifyNewNotification(Client * sender, ServerNotification notification) {}
 };
 
-
-#endif /* CLIENTLISTENER_H_ */

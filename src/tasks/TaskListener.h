@@ -1,12 +1,4 @@
-/*
- * TaskListener.h
- *
- *  Created on: Apr 6, 2012
- *      Author: Simon
- */
-
-#ifndef TASKLISTENER_H_
-#define TASKLISTENER_H_
+#pragma once
 
 class Task;
 class TaskListener {
@@ -17,5 +9,3 @@ public:
 	virtual void NotifyStatus(Task * task) {}
 	virtual ~TaskListener() {}
 };
-
-#endif /* TASK_H_ */

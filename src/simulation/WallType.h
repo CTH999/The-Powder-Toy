@@ -1,25 +1,17 @@
-//
-//  WallType.h
-//  The Powder Toy
-//
-//  Created by Simon Robertshaw on 04/06/2012.
-//  Copyright (c) 2012 __MyCompanyName__. All rights reserved.
-//
-
-#ifndef The_Powder_Toy_WallType_h
-#define The_Powder_Toy_WallType_h
-
-#include "graphics/Graphics.h"
+#pragma once
+#include <memory>
+#include "common/String.h"
+#include "common/Vec2.h"
+#include "graphics/Pixel.h"
 class VideoBuffer;
 
 struct wall_type
 {
-	pixel colour;
-	pixel eglow; // if emap set, add this to fire glow
+	RGB colour;
+	RGB eglow; // if emap set, add this to fire glow
 	int drawstyle;
-	VideoBuffer * (*textureGen)(int, int, int);
-	const char *name;
-	const char *descs;
+	std::unique_ptr<VideoBuffer> (*textureGen)(int, Vec2<int>);
+	String name;
+	ByteString identifier;
+	String descs;
 };
-
-#endif
