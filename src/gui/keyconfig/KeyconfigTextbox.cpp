@@ -1,12 +1,13 @@
-#include "KeyboardBindingsTextbox.h"
-
+static int Aa;
+#if 0 // temporarily disabled so it doesn't interfere with what I'm doing -- LBPHacker
+#include "KeyconfigTextbox.h"
 #include "SDLCompat.h"
 #include "gui/interface/Window.h"
 #include "client/Client.h"
-#include "KeyboardBindingsModel.h"
-#include "KeyboardBindingsController.h"
+#include "KeyconfigModel.h"
+#include "KeyconfigController.h"
 
-KeyboardBindingsTextbox::KeyboardBindingsTextbox(ui::Point position, ui::Point size) :
+KeyconfigTextbox::KeyconfigTextbox(ui::Point position, ui::Point size) :
 	ui::Textbox(position, size)
 {
 	// reasonable defaults
@@ -15,29 +16,29 @@ KeyboardBindingsTextbox::KeyboardBindingsTextbox(ui::Point position, ui::Point s
 	Appearance.VerticalAlign = ui::Appearance::AlignMiddle;
 }
 
-void KeyboardBindingsTextbox::OnMouseClick(int x, int y, unsigned button)
+void KeyconfigTextbox::OnMouseClick(int x, int y, unsigned button)
 {
 	prevKey = GetText();
 	SetText("");
 	c->ForceHasConflict();
 }
 
-void KeyboardBindingsTextbox::AttachController(KeyboardBindingsController* _c)
+void KeyconfigTextbox::AttachController(KeyconfigController* _c)
 {
 	c = _c;
 }
 
-void KeyboardBindingsTextbox::SetModel(BindingModel _model)
+void KeyconfigTextbox::SetModel(BindingModel _model)
 {
 	model = _model;
 }
 
-void KeyboardBindingsTextbox::SetTextToPrevious()
+void KeyconfigTextbox::SetTextToPrevious()
 {
 	SetText(prevKey);	
 }
 
-void KeyboardBindingsTextbox::SetTextFromModifierAndScan(int modifier, int scan)
+void KeyconfigTextbox::SetTextFromModifierAndScan(int modifier, int scan)
 {
 	ByteString modDisplay;
 
@@ -63,7 +64,7 @@ void KeyboardBindingsTextbox::SetTextFromModifierAndScan(int modifier, int scan)
 	SetText(keyNameDisplay.FromUtf8());
 }
 
-void KeyboardBindingsTextbox::OnKeyRelease(int key, int scan, bool repeat, bool shift, bool ctrl, bool alt)
+void KeyconfigTextbox::OnKeyRelease(int key, int scan, bool repeat, bool shift, bool ctrl, bool alt)
 {
 	ui::Textbox::OnKeyRelease(key, scan, repeat, shift, ctrl, alt);
 
@@ -118,3 +119,4 @@ void KeyboardBindingsTextbox::OnKeyRelease(int key, int scan, bool repeat, bool 
 	// should the user carelessly click about
 	c->NotifyKeyReleased();
 }
+#endif
