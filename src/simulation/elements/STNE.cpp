@@ -1,10 +1,10 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_STNE PT_STNE 5
-Element_STNE::Element_STNE()
+#include "simulation/ElementCommon.h"
+
+void Element::Element_STNE()
 {
 	Identifier = "DEFAULT_PT_STNE";
 	Name = "STNE";
-	Colour = PIXPACK(0xA0A0A0);
+	Colour = 0xA0A0A0_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_POWDERS;
 	Enabled = 1;
@@ -26,9 +26,8 @@ Element_STNE::Element_STNE()
 
 	Weight = 90;
 
-	Temperature = R_TEMP+0.0f	+273.15f;
 	HeatConduct = 150;
-	Description = "Heavy particles. Meltable.";
+	Description = "Stone. Heavy particles, meltable.";
 
 	Properties = TYPE_PART;
 
@@ -40,8 +39,4 @@ Element_STNE::Element_STNE()
 	LowTemperatureTransition = NT;
 	HighTemperature = 983.0f;
 	HighTemperatureTransition = PT_LAVA;
-
-	Update = NULL;
 }
-
-Element_STNE::~Element_STNE() {}

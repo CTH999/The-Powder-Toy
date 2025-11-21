@@ -1,10 +1,10 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_PSTE PT_PSTE 111
-Element_PSTE::Element_PSTE()
+#include "simulation/ElementCommon.h"
+
+void Element::Element_PSTE()
 {
 	Identifier = "DEFAULT_PT_PSTE";
 	Name = "PSTE";
-	Colour = PIXPACK(0xAA99AA);
+	Colour = 0xAA99AA_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_LIQUID;
 	Enabled = 1;
@@ -22,11 +22,11 @@ Element_PSTE::Element_PSTE()
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 0;
-	Hardness = 20;
+	Hardness = 18;
 
 	Weight = 31;
 
-	Temperature = R_TEMP-2.0f	+273.15f;
+	DefaultProperties.temp = R_TEMP - 2.0f + 273.15f;
 	HeatConduct = 29;
 	Description = "Colloid, Hardens under pressure.";
 
@@ -40,8 +40,4 @@ Element_PSTE::Element_PSTE()
 	LowTemperatureTransition = NT;
 	HighTemperature = 747.0f;
 	HighTemperatureTransition = PT_BRCK;
-
-	Update = NULL;
 }
-
-Element_PSTE::~Element_PSTE() {}

@@ -1,10 +1,14 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_GRVT PT_GRVT 177
-Element_GRVT::Element_GRVT()
+#include "simulation/ElementCommon.h"
+
+static int update(UPDATE_FUNC_ARGS);
+static int graphics(GRAPHICS_FUNC_ARGS);
+static void create(ELEMENT_CREATE_FUNC_ARGS);
+
+void Element::Element_GRVT()
 {
 	Identifier = "DEFAULT_PT_GRVT";
 	Name = "GRVT";
-	Colour = PIXPACK(0x00EE76);
+	Colour = 0x00EE76_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_NUCLEAR;
 	Enabled = 1;
@@ -26,7 +30,6 @@ Element_GRVT::Element_GRVT()
 
 	Weight = -1;
 
-	Temperature = R_TEMP+273.15f;
 	HeatConduct = 61;
 	Description = "Gravitons. Create Newtonian Gravity.";
 
@@ -41,12 +44,14 @@ Element_GRVT::Element_GRVT()
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
 
-	Update = &Element_GRVT::update;
-	Graphics = &Element_GRVT::graphics;
+	DefaultProperties.tmp = 7;
+
+	Update = &update;
+	Graphics = &graphics;
+	Create = &create;
 }
 
-//#TPT-Directive ElementHeader Element_GRVT static int update(UPDATE_FUNC_ARGS)
-int Element_GRVT::update(UPDATE_FUNC_ARGS)
+static int update(UPDATE_FUNC_ARGS)
 {
 	//at higher tmps they just go completely insane
 	if (parts[i].tmp >= 100)
@@ -54,12 +59,21 @@ int Element_GRVT::update(UPDATE_FUNC_ARGS)
 	if (parts[i].tmp <= -100)
 		parts[i].tmp = -100;
 
-	sim->gravmap[(y/CELL)*(XRES/CELL)+(x/CELL)] = 0.2f*parts[i].tmp;
+	int under = pmap[y][x];
+	int utype = TYP(under);
+
+	//Randomly kill GRVT inside RSSS
+	if((utype == PT_RSSS) && sim->rng.chance(1, 5))
+	{
+
+		sim->kill_part(i);
+		return 1;
+	}
+	sim->gravIn.mass[Vec2{ x, y } / CELL] = 0.2f * parts[i].tmp;
 	return 0;
 }
 
-//#TPT-Directive ElementHeader Element_GRVT static int graphics(GRAPHICS_FUNC_ARGS)
-int Element_GRVT::graphics(GRAPHICS_FUNC_ARGS)
+static int graphics(GRAPHICS_FUNC_ARGS)
 {
 	*firea = 5;
 	*firer = 0;
@@ -70,4 +84,10 @@ int Element_GRVT::graphics(GRAPHICS_FUNC_ARGS)
 	return 1;
 }
 
-Element_GRVT::~Element_GRVT() {}
+static void create(ELEMENT_CREATE_FUNC_ARGS)
+{
+	float a = sim->rng.between(0, 359) * 3.14159f / 180.0f;
+	sim->parts[i].life = 250 + sim->rng.between(0, 199);
+	sim->parts[i].vx = 2.0f*cosf(a);
+	sim->parts[i].vy = 2.0f*sinf(a);
+}

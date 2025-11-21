@@ -1,10 +1,15 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_PROT PT_PROT 173
-Element_PROT::Element_PROT()
+#include "simulation/ElementCommon.h"
+
+static int update(UPDATE_FUNC_ARGS);
+static int graphics(GRAPHICS_FUNC_ARGS);
+static void create(ELEMENT_CREATE_FUNC_ARGS);
+static int DeutImplosion(Simulation * sim, int n, int x, int y, float temp, int t);
+
+void Element::Element_PROT()
 {
 	Identifier = "DEFAULT_PT_PROT";
 	Name = "PROT";
-	Colour = PIXPACK(0x990000);
+	Colour = 0x990000_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_NUCLEAR;
 	Enabled = 1;
@@ -26,9 +31,8 @@ Element_PROT::Element_PROT()
 
 	Weight = -1;
 
-	Temperature = R_TEMP+273.15f;
 	HeatConduct = 61;
-	Description = "Protons. Transfer heat to materials, and removes sparks.";
+	Description = "Protons. Transfer heat to materials, and remove sparks.";
 
 	Properties = TYPE_ENERGY;
 
@@ -41,13 +45,17 @@ Element_PROT::Element_PROT()
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
 
-	Update = &Element_PROT::update;
-	Graphics = &Element_PROT::graphics;
+	DefaultProperties.life = 75;
+
+	Update = &update;
+	Graphics = &graphics;
+	Create = &create;
 }
 
-//#TPT-Directive ElementHeader Element_PROT static int update(UPDATE_FUNC_ARGS)
-int Element_PROT::update(UPDATE_FUNC_ARGS)
+static int update(UPDATE_FUNC_ARGS)
 {
+	auto &sd = SimulationData::CRef();
+	auto &elements = sd.elements;
 	sim->pv[y/CELL][x/CELL] -= .003f;
 	int under = pmap[y][x];
 	int utype = TYP(under);
@@ -68,7 +76,7 @@ int Element_PROT::update(UPDATE_FUNC_ARGS)
 		break;
 	}
 	case PT_DEUT:
-		if (RNG::Ref().chance(-((int)sim->pv[y / CELL][x / CELL] - 4) + (parts[uID].life / 100), 200))
+		if (sim->rng.chance(-((int)sim->pv[y / CELL][x / CELL] - 4) + (parts[uID].life / 100), 200))
 		{
 			DeutImplosion(sim, parts[uID].life, x, y, restrict_flt(parts[uID].temp + parts[uID].life * 500, MIN_TEMP, MAX_TEMP), PT_PROT);
 			sim->kill_part(uID);
@@ -76,7 +84,7 @@ int Element_PROT::update(UPDATE_FUNC_ARGS)
 		break;
 	case PT_LCRY:
 		//Powered LCRY reaction: PROT->PHOT
-		if (parts[uID].life > 5 && RNG::Ref().chance(1, 10))
+		if (parts[uID].life > 5 && sim->rng.chance(1, 10))
 		{
 			sim->part_change_type(i, x, y, PT_PHOT);
 			parts[i].life *= 2;
@@ -95,24 +103,34 @@ int Element_PROT::update(UPDATE_FUNC_ARGS)
 		else change = 0.0f;
 		parts[uID].temp = restrict_flt(parts[uID].temp + change, MIN_TEMP, MAX_TEMP);
 		break;
+	case PT_RSSS: //Destroy RSSS
+		{
+			sim->kill_part(uID);
+			sim->kill_part(i);
+			return 1;
+		}
+		break;
 	case PT_NONE:
 		//slowly kill if it's not inside an element
 		if (parts[i].life)
 		{
 			if (!--parts[i].life)
+			{
 				sim->kill_part(i);
+				return 1;
+			}
 		}
 		break;
 	default:
 		//set off explosives (only when hot because it wasn't as fun when it made an entire save explode)
-		if (parts[i].temp > 273.15f + 500.0f && (sim->elements[utype].Flammable || sim->elements[utype].Explosive || utype == PT_BANG))
+		if (parts[i].temp > 273.15f + 500.0f && (elements[utype].Flammable || elements[utype].Explosive || utype == PT_BANG))
 		{
 			sim->create_part(uID, x, y, PT_FIRE);
-			parts[uID].temp += restrict_flt(sim->elements[utype].Flammable * 5, MIN_TEMP, MAX_TEMP);
+			parts[uID].temp += restrict_flt(float(elements[utype].Flammable * 5), MIN_TEMP, MAX_TEMP);
 			sim->pv[y / CELL][x / CELL] += 1.00f;
 		}
 		//prevent inactive sparkable elements from being sparked
-		else if ((sim->elements[utype].Properties&PROP_CONDUCTS) && parts[uID].life <= 4)
+		else if ((elements[utype].Properties&PROP_CONDUCTS) && parts[uID].life <= 4)
 		{
 			parts[uID].life = 40 + parts[uID].life;
 		}
@@ -143,7 +161,7 @@ int Element_PROT::update(UPDATE_FUNC_ARGS)
 			element = PT_CO2;
 		else
 			element = PT_NBLE;
-		newID = sim->create_part(-1, x + RNG::Ref().between(-1, 1), y + RNG::Ref().between(-1, 1), element);
+		newID = sim->create_part(-1, x + sim->rng.between(-1, 1), y + sim->rng.between(-1, 1), element);
 		if (newID >= 0)
 			parts[newID].temp = restrict_flt(100.0f*parts[i].tmp, MIN_TEMP, MAX_TEMP);
 		sim->kill_part(i);
@@ -169,8 +187,7 @@ int Element_PROT::update(UPDATE_FUNC_ARGS)
 	return 0;
 }
 
-//#TPT-Directive ElementHeader Element_PROT static int DeutImplosion(Simulation * sim, int n, int x, int y, float temp, int t)
-int Element_PROT::DeutImplosion(Simulation * sim, int n, int x, int y, float temp, int t)
+static int DeutImplosion(Simulation * sim, int n, int x, int y, float temp, int t)
 {
 	int i;
 	n = (n/50);
@@ -184,15 +201,14 @@ int Element_PROT::DeutImplosion(Simulation * sim, int n, int x, int y, float tem
 		i = sim->create_part(-3, x, y, t);
 		if (i >= 0)
 			sim->parts[i].temp = temp;
-		else if (sim->pfree < 0)
+		else if (sim->parts.MaxPartsReached())
 			break;
 	}
 	sim->pv[y/CELL][x/CELL] -= (6.0f * CFDS)*n;
 	return 0;
 }
 
-//#TPT-Directive ElementHeader Element_PROT static int graphics(GRAPHICS_FUNC_ARGS)
-int Element_PROT::graphics(GRAPHICS_FUNC_ARGS)
+static int graphics(GRAPHICS_FUNC_ARGS)
 {
 	*firea = 7;
 	*firer = 250;
@@ -203,4 +219,10 @@ int Element_PROT::graphics(GRAPHICS_FUNC_ARGS)
 	return 1;
 }
 
-Element_PROT::~Element_PROT() {}
+static void create(ELEMENT_CREATE_FUNC_ARGS)
+{
+	float a = sim->rng.between(0, 35) * 0.17453f;
+	sim->parts[i].life = 680;
+	sim->parts[i].vx = 2.0f * cosf(a);
+	sim->parts[i].vy = 2.0f * sinf(a);
+}

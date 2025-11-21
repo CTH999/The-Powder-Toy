@@ -1,28 +1,41 @@
-#ifndef LOGINMODEL_H_
-#define LOGINMODEL_H_
-
-#include <vector>
+#pragma once
 #include "common/String.h"
-#include "LoginView.h"
-#include "client/Client.h"
+#include "client/User.h"
+#include <vector>
+#include <memory>
 
-using namespace std;
+namespace http
+{
+	class LoginRequest;
+	class LogoutRequest;
+}
 
-class LoginView;
-class LoginModel {
-	vector<LoginView*> observers;
-	String statusText;
-	bool loginStatus;
-	void notifyStatusChanged();
-	User currentUser;
-public:
-	LoginModel();
-	void Login(ByteString username, ByteString password);
-	void AddObserver(LoginView * observer);
-	String GetStatusText();
-	bool GetStatus();
-	User GetUser();
-	virtual ~LoginModel();
+enum LoginStatus
+{
+	loginIdle,
+	loginWorking,
+	loginSucceeded,
 };
 
-#endif /* LOGINMODEL_H_ */
+class LoginView;
+class LoginModel
+{
+	std::unique_ptr<http::LoginRequest> loginRequest;
+	std::unique_ptr<http::LogoutRequest> logoutRequest;
+	std::vector<LoginView*> observers;
+	String statusText;
+	LoginStatus loginStatus = loginIdle;
+	void notifyStatusChanged();
+
+public:
+	void Login(ByteString username, ByteString password);
+	void Logout();
+	void AddObserver(LoginView * observer);
+	String GetStatusText();
+	LoginStatus GetStatus() const
+	{
+		return loginStatus;
+	}
+	void Tick();
+	~LoginModel();
+};

@@ -1,18 +1,21 @@
-#ifndef PROFILEACTIVITY_H_
-#define PROFILEACTIVITY_H_
-
+#pragma once
 #include "common/String.h"
 #include "Activity.h"
-#include "client/requestbroker/RequestListener.h"
 #include "client/UserInfo.h"
-#include "gui/interface/Window.h"
+#include <memory>
+
+namespace http
+{
+	class SaveUserInfoRequest;
+	class GetUserInfoRequest;
+}
 
 namespace ui
 {
 class Label;
 class ScrollPanel;
 }
-class ProfileActivity: public WindowActivity, public RequestListener {
+class ProfileActivity: public WindowActivity {
 	ui::ScrollPanel *scrollPanel;
 	ui::Label *location;
 	ui::Label *bio;
@@ -23,16 +26,16 @@ class ProfileActivity: public WindowActivity, public RequestListener {
 	bool doError;
 	String doErrorMessage;
 	void setUserInfo(UserInfo newInfo);
+
+	std::unique_ptr<http::SaveUserInfoRequest> saveUserInfoRequest;
+	std::unique_ptr<http::GetUserInfoRequest> getUserInfoRequest;
+
 public:
 	ProfileActivity(ByteString username);
 	virtual ~ProfileActivity();
-	virtual void OnResponseReady(void * userDataPtr, int identifier);
-	virtual void OnResponseFailed(int identifier);
-	virtual void OnTick(float dt);
-	virtual void OnDraw();
-	virtual void OnTryExit(ExitMethod method);
+	void OnTick() override;
+	void OnDraw() override;
+	void OnTryExit(ExitMethod method) override;
 
 	void ResizeArea();
 };
-
-#endif /* PROFILEACTIVITY_H_ */
