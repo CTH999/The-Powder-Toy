@@ -1,6 +1,16 @@
-#pragma once
-#include "StructProperty.h"
+//
+//  Particle.h
+//  The Powder Toy
+//
+//  Created by Simon Robertshaw on 04/06/2012.
+//  Copyright (c) 2012 __MyCompanyName__. All rights reserved.
+//
+
+#ifndef The_Powder_Toy_Particle_h
+#define The_Powder_Toy_Particle_h
+
 #include <vector>
+#include "StructProperty.h"
 
 struct Particle
 {
@@ -8,24 +18,15 @@ struct Particle
 	int life, ctype;
 	float x, y, vx, vy;
 	float temp;
-	int tmp3;
-	int tmp4;
+	float pavg[2];
 	int flags;
 	int tmp;
 	int tmp2;
 	unsigned int dcolour;
 	/** Returns a list of properties, their type and offset within the structure that can be changed
-	 by higher-level processes referring to them by name such as Lua or the property tool **/
-	static std::vector<StructProperty> const &GetProperties();
-	static std::vector<StructPropertyAlias> const &GetPropertyAliases();
-	static std::vector<unsigned int> const &PossiblyCarriesType();
+	 by higher-level processes refering to them by name such as Lua or the property tool **/
+	static std::vector<StructProperty> GetProperties();
+	static StructProperty GetProperty(std::string propertyName);
 };
 
-// important: these are indices into the vector returned by Particle::GetProperties, not indices into Particle
-constexpr unsigned int FIELD_TYPE  =  0;
-constexpr unsigned int FIELD_LIFE  =  1;
-constexpr unsigned int FIELD_CTYPE =  2;
-constexpr unsigned int FIELD_TMP   =  9;
-constexpr unsigned int FIELD_TMP2  = 10;
-constexpr unsigned int FIELD_TMP3  = 11;
-constexpr unsigned int FIELD_TMP4  = 12;
+#endif
