@@ -1,14 +1,10 @@
-#include "simulation/ElementCommon.h"
-#include "FILT.h"
-
-static int graphics(GRAPHICS_FUNC_ARGS);
-static void create(ELEMENT_CREATE_FUNC_ARGS);
-
-void Element::Element_FILT()
+#include "simulation/Elements.h"
+//#TPT-Directive ElementClass Element_FILT PT_FILT 125
+Element_FILT::Element_FILT()
 {
 	Identifier = "DEFAULT_PT_FILT";
 	Name = "FILT";
-	Colour = 0x000056_rgb;
+	Colour = PIXPACK(0x000056);
 	MenuVisible = 1;
 	MenuSection = SC_SOLIDS;
 	Enabled = 1;
@@ -30,10 +26,11 @@ void Element::Element_FILT()
 
 	Weight = 100;
 
+	Temperature = R_TEMP+0.0f	+273.15f;
 	HeatConduct = 251;
-	Description = "Filter. Changes color of PHOT and BIZR. Color depends on temperature.";
+	Description = "Filter for photons, changes the color.";
 
-	Properties = TYPE_SOLID | PROP_PHOTPASS | PROP_NOAMBHEAT | PROP_LIFE_DEC;
+	Properties = TYPE_SOLID | PROP_NOAMBHEAT | PROP_LIFE_DEC;
 
 	LowPressure = IPL;
 	LowPressureTransition = NT;
@@ -44,13 +41,19 @@ void Element::Element_FILT()
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
 
-	Graphics = &graphics;
-	Create = &create;
+	Update = NULL;
+	Graphics = &Element_FILT::graphics;
 }
 
-static int graphics(GRAPHICS_FUNC_ARGS)
+//#TPT-Directive ElementHeader Element_FILT static int NUM_MODES
+int Element_FILT::NUM_MODES = 12;
+//#TPT-Directive ElementHeader Element_FILT static String MODES[]
+String Element_FILT::MODES[] = {"set colour", "AND", "OR", "subtract colour", "red shift", "blue shift", "no effect", "XOR", "NOT", "old QRTZ scattering", "variable red shift", "variable blue shift"};
+
+//#TPT-Directive ElementHeader Element_FILT static int graphics(GRAPHICS_FUNC_ARGS)
+int Element_FILT::graphics(GRAPHICS_FUNC_ARGS)
 {
-	int x, wl = Element_FILT_getWavelengths(cpart);
+	int x, wl = Element_FILT::getWavelengths(cpart);
 	*colg = 0;
 	*colb = 0;
 	*colr = 0;
@@ -73,17 +76,13 @@ static int graphics(GRAPHICS_FUNC_ARGS)
 	return 0;
 }
 
-static void create(ELEMENT_CREATE_FUNC_ARGS)
-{
-	sim->parts[i].tmp = v;
-}
-
+//#TPT-Directive ElementHeader Element_FILT static int interactWavelengths(Particle* cpart, int origWl)
 // Returns the wavelengths in a particle after FILT interacts with it (e.g. a photon)
 // cpart is the FILT particle, origWl the original wavelengths in the interacting particle
-int Element_FILT_interactWavelengths(Simulation *sim, Particle* cpart, int origWl)
+int Element_FILT::interactWavelengths(Particle* cpart, int origWl)
 {
 	const int mask = 0x3FFFFFFF;
-	int filtWl = Element_FILT_getWavelengths(cpart);
+	int filtWl = getWavelengths(cpart);
 	switch (cpart->tmp)
 	{
 		case 0:
@@ -114,9 +113,9 @@ int Element_FILT_interactWavelengths(Simulation *sim, Particle* cpart, int origW
 			return (~origWl) & mask; // Invert colours
 		case 9:
 		{
-			int t1 = (origWl & 0x0000FF) + sim->rng.between(-2, 2);
-			int t2 = ((origWl & 0x00FF00)>>8) + sim->rng.between(-2, 2);
-			int t3 = ((origWl & 0xFF0000)>>16) + sim->rng.between(-2, 2);
+			int t1 = (origWl & 0x0000FF) + RNG::Ref().between(-2, 2);
+			int t2 = ((origWl & 0x00FF00)>>8) + RNG::Ref().between(-2, 2);
+			int t3 = ((origWl & 0xFF0000)>>16) + RNG::Ref().between(-2, 2);
 			return (origWl & 0xFF000000) | (t3<<16) | (t2<<8) | t1;
 		}
 		case 10:
@@ -134,7 +133,8 @@ int Element_FILT_interactWavelengths(Simulation *sim, Particle* cpart, int origW
 	}
 }
 
-int Element_FILT_getWavelengths(const Particle* cpart)
+//#TPT-Directive ElementHeader Element_FILT static int getWavelengths(Particle* cpart)
+int Element_FILT::getWavelengths(Particle* cpart)
 {
 	if (cpart->ctype&0x3FFFFFFF)
 	{
@@ -148,3 +148,5 @@ int Element_FILT_getWavelengths(const Particle* cpart)
 		return (0x1F << temp_bin);
 	}
 }
+
+Element_FILT::~Element_FILT() {}
