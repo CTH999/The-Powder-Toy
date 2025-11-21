@@ -1,25 +1,22 @@
-#ifndef USERINFO_H_
-#define USERINFO_H_
+#pragma once
+#include "common/String.h"
+#include <optional>
 
-#include <string>
-
-class UserInfo
+struct UserInfo
 {
-public:
-	int ID;
-	int Age;
-	std::string Username;
-	std::string Biography;
-	std::string Location;
-	UserInfo(int id, int age, std::string username, std::string biography, std::string location):
-		ID(id),
-		Age(age),
-		Username(username),
-		Biography(biography),
-		Location(location)
-	{ }
-	UserInfo() {}
+	int UserID;
+	int age;
+	ByteString username;
+	String biography;
+	String location;
+	ByteString website;
+
+	int saveCount;
+	float averageScore;
+	int highestScore;
+
+	int topicCount;
+	int topicReplies;
+	int reputation;
+	std::optional<time_t> registeredAt;
 };
-
-
-#endif /* USER_H_ */

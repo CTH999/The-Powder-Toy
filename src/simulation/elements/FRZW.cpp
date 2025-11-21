@@ -1,14 +1,16 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_FRZW PT_FRZW 101
-Element_FRZW::Element_FRZW()
+#include "simulation/ElementCommon.h"
+
+static int update(UPDATE_FUNC_ARGS);
+
+void Element::Element_FRZW()
 {
 	Identifier = "DEFAULT_PT_FRZW";
 	Name = "FRZW";
-	Colour = PIXPACK(0x1020C0);
-	MenuVisible = 1;
-	MenuSection = SC_CRACKER2;
+	Colour = 0x1020C0_rgb;
+	MenuVisible = 0;
+	MenuSection = SC_LIQUID;
 	Enabled = 1;
-	
+
 	Advection = 0.6f;
 	AirDrag = 0.01f * CFDS;
 	AirLoss = 0.98f;
@@ -18,51 +20,53 @@ Element_FRZW::Element_FRZW()
 	Diffusion = 0.00f;
 	HotAir = 0.000f	* CFDS;
 	Falldown = 2;
-	
+
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 0;
 	Hardness = 20;
-	
+
 	Weight = 30;
-	
-	Temperature = 120.0f;
+
+	DefaultProperties.temp = 120.0f;
 	HeatConduct = 29;
 	Description = "Freeze water. Hybrid liquid formed when Freeze powder melts.";
-	
-	State = ST_LIQUID;
-	Properties = TYPE_LIQUID||PROP_LIFE_DEC;
-	
+
+	Properties = TYPE_LIQUID | PROP_LIFE_DEC;
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;
 	HighPressureTransition = NT;
-	LowTemperature = ITL;
-	LowTemperatureTransition = NT;
-	HighTemperature = 53.0f;
-	HighTemperatureTransition = PT_ICEI;
-	
-	Update = &Element_FRZW::update;
-	
+	LowTemperature = 53.0f;
+	LowTemperatureTransition = PT_ICEI;
+	HighTemperature = ITH;
+	HighTemperatureTransition = NT;
+
+	DefaultProperties.life = 100;
+
+	Update = &update;
 }
 
-//#TPT-Directive ElementHeader Element_FRZW static int update(UPDATE_FUNC_ARGS)
-int Element_FRZW::update(UPDATE_FUNC_ARGS)
- {
-	int r, rx, ry;
-	for (rx=-1; rx<2; rx++)
-		for (ry=-1; ry<2; ry++)
-			if (BOUNDS_CHECK && (rx || ry))
+static int update(UPDATE_FUNC_ARGS)
+{
+	for (auto rx = -1; rx <= 1; rx++)
+	{
+		for (auto ry = -1; ry <= 1; ry++)
+		{
+			if (rx || ry)
 			{
-				r = pmap[y+ry][x+rx];
+				auto r = pmap[y+ry][x+rx];
 				if (!r)
 					continue;
-				if ((r&0xFF)==PT_WATR && !(rand()%14))
+				if (TYP(r)==PT_WATR && sim->rng.chance(1, 14))
 				{
-					sim->part_change_type(r>>8,x+rx,y+ry,PT_FRZW);
+					sim->part_change_type(ID(r),x+rx,y+ry,PT_FRZW);
 				}
 			}
-	if ((parts[i].life==0 && !(rand()%192)) || (100-(parts[i].life))>rand()%50000 )
+		}
+	}
+	if ((parts[i].life==0 && sim->rng.chance(1, 192)) || sim->rng.chance(100-parts[i].life, 50000))
 	{
 		sim->part_change_type(i,x,y,PT_ICEI);
 		parts[i].ctype=PT_FRZW;
@@ -70,6 +74,3 @@ int Element_FRZW::update(UPDATE_FUNC_ARGS)
 	}
 	return 0;
 }
-
-
-Element_FRZW::~Element_FRZW() {}

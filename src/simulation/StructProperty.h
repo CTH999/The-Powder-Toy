@@ -1,31 +1,41 @@
-#ifndef STRUCTPROPERTY_H_
-#define STRUCTPROPERTY_H_
+#pragma once
+#include "common/String.h"
+#include <cstdint>
+#include <variant>
 
-#include <string>
-#include <stdint.h>
+using PropertyValue = std::variant<
+	int,
+	unsigned int,
+	float
+>;
 
 struct StructProperty
 {
-	enum PropertyType { ParticleType, Colour, Integer, UInteger, Float, String, Char, UChar };
-	std::string Name;
+	enum PropertyType
+	{
+		TransitionType,
+		ParticleType,
+		Colour,
+		Integer,
+		UInteger,
+		Float,
+		BString,
+		String,
+		UChar,
+		Removed
+	};
+	ByteString Name;
 	PropertyType Type;
 	intptr_t Offset;
-	
-	StructProperty(std::string name, PropertyType type, intptr_t offset):
-	Name(name),
-	Type(type),
-	Offset(offset)
-	{
-		
-	}
 
-	StructProperty():
-	Name(""),
-	Type(Char),
-	Offset(0)
-	{
-		
-	}
+	StructProperty();
+	StructProperty(ByteString name, PropertyType type, intptr_t offset);
+
+	bool operator ==(const StructProperty &other) const;
+	::String ToString(const PropertyValue &value) const;
 };
 
-#endif
+struct StructPropertyAlias
+{
+	ByteString from, to;
+};

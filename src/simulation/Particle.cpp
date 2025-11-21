@@ -1,20 +1,62 @@
-#include <cstddef>
 #include "Particle.h"
+#include <cstddef>
+#include <cassert>
 
-std::vector<StructProperty> Particle::GetProperties()
+std::vector<StructProperty> const &Particle::GetProperties()
 {
-	std::vector<StructProperty> properties;
-	properties.push_back(StructProperty("type", StructProperty::ParticleType, offsetof(Particle, type)));
-	properties.push_back(StructProperty("life", StructProperty::ParticleType, offsetof(Particle, life)));
-	properties.push_back(StructProperty("ctype", StructProperty::ParticleType, offsetof(Particle, ctype)));
-	properties.push_back(StructProperty("x", StructProperty::Float, offsetof(Particle, x)));
-	properties.push_back(StructProperty("y", StructProperty::Float, offsetof(Particle, y)));
-	properties.push_back(StructProperty("vx", StructProperty::Float, offsetof(Particle, vx)));
-	properties.push_back(StructProperty("vy", StructProperty::Float, offsetof(Particle, vy)));
-	properties.push_back(StructProperty("temp", StructProperty::Float, offsetof(Particle, temp)));
-	properties.push_back(StructProperty("flags", StructProperty::UInteger, offsetof(Particle, flags)));
-	properties.push_back(StructProperty("tmp", StructProperty::Integer, offsetof(Particle, tmp)));
-	properties.push_back(StructProperty("tmp2", StructProperty::Integer, offsetof(Particle, tmp2)));
-	properties.push_back(StructProperty("dcolour", StructProperty::UInteger, offsetof(Particle, dcolour)));
+	static std::vector<StructProperty> properties = {
+		{ "type"   , StructProperty::ParticleType, (intptr_t)(offsetof(Particle, type   )) },
+		{ "life"   , StructProperty::Integer     , (intptr_t)(offsetof(Particle, life   )) },
+		{ "ctype"  , StructProperty::ParticleType, (intptr_t)(offsetof(Particle, ctype  )) },
+		{ "x"      , StructProperty::Float       , (intptr_t)(offsetof(Particle, x      )) },
+		{ "y"      , StructProperty::Float       , (intptr_t)(offsetof(Particle, y      )) },
+		{ "vx"     , StructProperty::Float       , (intptr_t)(offsetof(Particle, vx     )) },
+		{ "vy"     , StructProperty::Float       , (intptr_t)(offsetof(Particle, vy     )) },
+		{ "temp"   , StructProperty::Float       , (intptr_t)(offsetof(Particle, temp   )) },
+		{ "flags"  , StructProperty::UInteger    , (intptr_t)(offsetof(Particle, flags  )) },
+		{ "tmp"    , StructProperty::Integer     , (intptr_t)(offsetof(Particle, tmp    )) },
+		{ "tmp2"   , StructProperty::Integer     , (intptr_t)(offsetof(Particle, tmp2   )) },
+		{ "tmp3"   , StructProperty::Integer     , (intptr_t)(offsetof(Particle, tmp3   )) },
+		{ "tmp4"   , StructProperty::Integer     , (intptr_t)(offsetof(Particle, tmp4   )) },
+		{ "dcolour", StructProperty::UInteger    , (intptr_t)(offsetof(Particle, dcolour)) },
+	};
 	return properties;
+}
+
+std::vector<StructPropertyAlias> const &Particle::GetPropertyAliases()
+{
+	static std::vector<StructPropertyAlias> aliases = {
+		{ "pavg0" , "tmp3"    },
+		{ "pavg1" , "tmp4"    },
+		{ "dcolor", "dcolour" },
+	};
+	return aliases;
+}
+
+std::vector<unsigned int> const &Particle::PossiblyCarriesType()
+{
+	struct DoOnce
+	{
+		std::vector<unsigned int> indices = {
+			FIELD_LIFE,
+			FIELD_CTYPE,
+			FIELD_TMP,
+			FIELD_TMP2,
+			FIELD_TMP3,
+			FIELD_TMP4,
+		};
+
+		DoOnce()
+		{
+			auto &properties = GetProperties();
+			for (auto index : indices)
+			{
+				// code that depends on PossiblyCarriesType only knows how to set ints
+				assert(properties[index].Type == StructProperty::Integer ||
+				       properties[index].Type == StructProperty::ParticleType);
+			}
+		}
+	};
+	static DoOnce doOnce;
+	return doOnce.indices;
 }

@@ -1,19 +1,17 @@
-#include "simulation/Elements.h"
-extern "C"
-{
-	#include "hmap.h"
-}
+#include "simulation/ElementCommon.h"
 
-//#TPT-Directive ElementClass Element_CFLM PT_CFLM 68
-Element_CFLM::Element_CFLM()
+static int graphics(GRAPHICS_FUNC_ARGS);
+static void create(ELEMENT_CREATE_FUNC_ARGS);
+
+void Element::Element_CFLM()
 {
 	Identifier = "DEFAULT_PT_HFLM";
 	Name = "CFLM";
-	Colour = PIXPACK(0x8080FF);
+	Colour = 0x8080FF_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_EXPLOSIVE;
 	Enabled = 1;
-	
+
 	Advection = 0.9f;
 	AirDrag = 0.04f * CFDS;
 	AirLoss = 0.97f;
@@ -22,22 +20,21 @@ Element_CFLM::Element_CFLM()
 	Gravity = -0.1f;
 	Diffusion = 0.00f;
 	HotAir = 0.0005f	* CFDS;
-	Falldown = 1;
-	
+	Falldown = 0;
+
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 0;
 	Hardness = 1;
-	
+
 	Weight = 2;
-	
-	Temperature = 0.0f;
+
+	DefaultProperties.temp = 0.0f;
 	HeatConduct = 88;
 	Description = "Sub-zero flame.";
-	
-	State = ST_LIQUID;
+
 	Properties = TYPE_GAS|PROP_LIFE_DEC|PROP_LIFE_KILL;
-	
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;
@@ -46,30 +43,30 @@ Element_CFLM::Element_CFLM()
 	LowTemperatureTransition = NT;
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
-	
-	Update = NULL;
-	Graphics = &Element_CFLM::graphics;
+
+	Graphics = &graphics;
+	Create = &create;
 }
 
-//#TPT-Directive ElementHeader Element_CFLM static int graphics(GRAPHICS_FUNC_ARGS)
-int Element_CFLM::graphics(GRAPHICS_FUNC_ARGS)
-
+static int graphics(GRAPHICS_FUNC_ARGS)
 {
-	int caddress = restrict_flt(restrict_flt((float)((int)(cpart->life/2)), 0.0f, 200.0f)*3, 0.0f, (200.0f*3)-3);
-	*colr = (unsigned char)hflm_data[caddress];
-	*colg = (unsigned char)hflm_data[caddress+1];
-	*colb = (unsigned char)hflm_data[caddress+2];
-	
+	RGB color = Renderer::clfmTableAt(cpart->life / 2);
+	*colr = color.Red;
+	*colg = color.Green;
+	*colb = color.Blue;
+
 	*firea = 255;
 	*firer = *colr;
 	*fireg = *colg;
 	*fireb = *colb;
-	
+
 	*pixel_mode = PMODE_NONE; //Clear default, don't draw pixel
 	*pixel_mode |= FIRE_ADD;
 	//Returning 0 means dynamic, do not cache
 	return 0;
 }
 
-
-Element_CFLM::~Element_CFLM() {}
+static void create(ELEMENT_CREATE_FUNC_ARGS)
+{
+	sim->parts[i].life = sim->rng.between(50, 199);
+}

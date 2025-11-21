@@ -1,14 +1,16 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_NBLE PT_NBLE 52
-Element_NBLE::Element_NBLE()
+#include "simulation/ElementCommon.h"
+
+static int update(UPDATE_FUNC_ARGS);
+
+void Element::Element_NBLE()
 {
 	Identifier = "DEFAULT_PT_NBLE";
 	Name = "NBLE";
-	Colour = PIXPACK(0xEB4917);
+	Colour = 0xEB4917_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_GAS;
 	Enabled = 1;
-	
+
 	Advection = 1.0f;
 	AirDrag = 0.01f * CFDS;
 	AirLoss = 0.99f;
@@ -18,21 +20,21 @@ Element_NBLE::Element_NBLE()
 	Diffusion = 0.75f;
 	HotAir = 0.001f	* CFDS;
 	Falldown = 0;
-	
+
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 0;
 	Hardness = 1;
-	
+	PhotonReflectWavelengths = 0x3FFF8000;
+
 	Weight = 1;
-	
-	Temperature = R_TEMP+2.0f	+273.15f;
+
+	DefaultProperties.temp = R_TEMP + 2.0f + 273.15f;
 	HeatConduct = 106;
-	Description = "Noble Gas. Diffuses. Conductive. Ionizes into plasma when introduced to electricity";
-	
-	State = ST_GAS;
+	Description = "Noble Gas. Ionizes into plasma when sparked. Diffuses.";
+
 	Properties = TYPE_GAS|PROP_CONDUCTS|PROP_LIFE_DEC;
-	
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;
@@ -41,50 +43,52 @@ Element_NBLE::Element_NBLE()
 	LowTemperatureTransition = NT;
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
-	
-	Update = &Element_NBLE::update;
-	
+
+	Update = &update;
 }
 
-//#TPT-Directive ElementHeader Element_NBLE static int update(UPDATE_FUNC_ARGS)
-int Element_NBLE::update(UPDATE_FUNC_ARGS)
+static int update(UPDATE_FUNC_ARGS)
 {
+	auto &sd = SimulationData::CRef();
+	auto &can_move = sd.can_move;
 	if (parts[i].temp > 5273.15 && sim->pv[y/CELL][x/CELL] > 100.0f)
 	{
-		parts[i].tmp = 1;
-		if (!(rand()%5))
+		parts[i].tmp |= 0x1;
+		if (sim->rng.chance(1, 5))
 		{
 			int j;
 			float temp = parts[i].temp;
 			sim->create_part(i,x,y,PT_CO2);
 
-			j = sim->create_part(-3,x+rand()%3-1,y+rand()%3-1,PT_NEUT);
+			j = sim->create_part(-3,x,y,PT_NEUT);
 			if (j != -1)
 				parts[j].temp = temp;
-			if (!(rand()%25))
+			if (sim->rng.chance(1, 25))
 			{
-				j = sim->create_part(-3,x+rand()%3-1,y+rand()%3-1,PT_ELEC);
+				j = sim->create_part(-3,x,y,PT_ELEC);
 				if (j != -1)
 					parts[j].temp = temp;
 			}
-			j = sim->create_part(-3,x+rand()%3-1,y+rand()%3-1,PT_PHOT);
+			j = sim->create_part(-3,x,y,PT_PHOT);
 			if (j != -1)
 			{
 				parts[j].ctype = 0xF800000;
 				parts[j].temp = temp;
+				parts[j].tmp = 0x1;
 			}
-			j = sim->create_part(-3,x+rand()%3-1,y+rand()%3-1,PT_PLSM);
-			if (j != -1)
+			int rx = x + sim->rng.between(-1, 1), ry = y + sim->rng.between(-1, 1), rt = TYP(pmap[ry][rx]);
+			if (can_move[PT_PLSM][rt] || rt == PT_NBLE)
 			{
-				parts[j].temp = temp;
-				parts[j].tmp |= 4;
+				j = sim->create_part(-3,rx,ry,PT_PLSM);
+				if (j != -1)
+				{
+					parts[j].temp = temp;
+					parts[j].tmp |= 4;
+				}
 			}
-			parts[i].temp = temp+1750+rand()%500;
+			parts[i].temp = temp + 1750 + sim->rng.between(0, 499);
 			sim->pv[y/CELL][x/CELL] += 50;
 		}
 	}
 	return 0;
 }
-
-
-Element_NBLE::~Element_NBLE() {}

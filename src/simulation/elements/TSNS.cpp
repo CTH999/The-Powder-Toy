@@ -1,14 +1,16 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_TSNS PT_TSNS 164
-Element_TSNS::Element_TSNS()
+#include "simulation/ElementCommon.h"
+
+static int update(UPDATE_FUNC_ARGS);
+
+void Element::Element_TSNS()
 {
 	Identifier = "DEFAULT_PT_TSNS";
 	Name = "TSNS";
-	Colour = PIXPACK(0xFD9D18);
+	Colour = 0xFD00D5_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_SENSOR;
 	Enabled = 1;
-	
+
 	Advection = 0.0f;
 	AirDrag = 0.00f * CFDS;
 	AirLoss = 0.96f;
@@ -18,21 +20,19 @@ Element_TSNS::Element_TSNS()
 	Diffusion = 0.00f;
 	HotAir = 0.000f	* CFDS;
 	Falldown = 0;
-	
+
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 0;
 	Hardness = 1;
-	
+
 	Weight = 100;
-	
-	Temperature = R_TEMP+0.0f	+273.15f;
+
 	HeatConduct = 0;
-	Description = "Creates a spark when there's a nearby particle with a greater temperature";
-	
-	State = ST_SOLID;
+	Description = "Temperature sensor, creates a spark when there's a nearby particle with a greater temperature.";
+
 	Properties = TYPE_SOLID;
-	
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;
@@ -41,53 +41,94 @@ Element_TSNS::Element_TSNS()
 	LowTemperatureTransition = NT;
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
-	
-	Update = &Element_TSNS::update;
-	
+
+	DefaultProperties.tmp2 = 2;
+
+	Update = &update;
 }
 
-//#TPT-Directive ElementHeader Element_TSNS static int update(UPDATE_FUNC_ARGS)
-int Element_TSNS::update(UPDATE_FUNC_ARGS)
+static int update(UPDATE_FUNC_ARGS)
 {
-	int r, rx, ry, rt, rd = parts[i].tmp2;
-	if (rd > 25) parts[i].tmp2 = rd = 25;
+	auto &sd = SimulationData::CRef();
+	auto &elements = sd.elements;
+	int rd = parts[i].tmp2;
+	if (rd > 25)
+		parts[i].tmp2 = rd = 25;
 	if (parts[i].life)
 	{
 		parts[i].life = 0;
-		for (rx=-2; rx<3; rx++)
-			for (ry=-2; ry<3; ry++)
-				if (BOUNDS_CHECK && (rx || ry))
+		for (int rx = -2; rx <= 2; rx++)
+		{
+			for (int ry = -2; ry <= 2; ry++)
+			{
+				if (rx || ry)
 				{
-					r = pmap[y+ry][x+rx];
+					int r = pmap[y+ry][x+rx];
+					if (!r)
+						r = sim->photons[y+ry][x+rx];
 					if (!r)
 						continue;
-					rt = r&0xFF;
-					if (sim->parts_avg(i,r>>8,PT_INSL) != PT_INSL)
+					int rt = TYP(r);
+					auto pavg = sim->parts_avg(i, ID(r), PT_INSL);
+					if (pavg != PT_INSL && pavg != PT_RSSS)
 					{
-						if ((sim->elements[rt].Properties&PROP_CONDUCTS) && !(rt==PT_WATR||rt==PT_SLTW||rt==PT_NTCT||rt==PT_PTCT||rt==PT_INWR) && parts[r>>8].life==0)
+						if ((elements[rt].Properties&PROP_CONDUCTS) && !(rt == PT_WATR || rt == PT_SLTW || rt == PT_NTCT || rt == PT_PTCT || rt == PT_INWR) && parts[ID(r)].life == 0)
 						{
-							parts[r>>8].life = 4;
-							parts[r>>8].ctype = rt;
-							sim->part_change_type(r>>8,x+rx,y+ry,PT_SPRK);
+							parts[ID(r)].life = 4;
+							parts[ID(r)].ctype = rt;
+							sim->part_change_type(ID(r), x+rx, y+ry, PT_SPRK);
 						}
 					}
 				}
-	}
-	for (rx=-rd; rx<rd+1; rx++)
-		for (ry=-rd; ry<rd+1; ry++)
-			if (x+rx>=0 && y+ry>=0 && x+rx<XRES && y+ry<YRES && (rx || ry))
-			{
-				r = pmap[y+ry][x+rx];
-				if(!r)
-					r = sim->photons[y+ry][x+rx];
-				if(!r)
-					continue;
-				if ((r&0xFF)!=PT_TSNS && (r&0xFF)!=PT_METL && parts[r>>8].temp > parts[i].temp)
-					parts[i].life = 1;
 			}
+		}
+	}
+	bool setFilt = false;
+	int photonWl = 0;
+	for (int rx = -rd; rx <= rd; rx++)
+		for (int ry = -rd; ry <= rd; ry++)
+			if (x + rx >= 0 && y + ry >= 0 && x + rx < XRES && y + ry < YRES && (rx || ry))
+			{
+				int r = pmap[y+ry][x+rx];
+				if (!r)
+					r = sim->photons[y+ry][x+rx];
+				if (!r)
+					continue;
+				if (parts[i].tmp == 0 && TYP(r) != PT_TSNS && TYP(r) != PT_METL && parts[ID(r)].temp > parts[i].temp)
+					parts[i].life = 1;
+				if (parts[i].tmp == 2 && TYP(r) != PT_TSNS && TYP(r) != PT_METL && parts[ID(r)].temp < parts[i].temp)
+					parts[i].life = 1;
+				if (parts[i].tmp == 1 && TYP(r) != PT_TSNS && TYP(r) != PT_FILT)
+				{
+					setFilt = true;
+					photonWl = int(parts[ID(r)].temp);
+				}
+			}
+	if (setFilt)
+	{
+		for (int rx = -1; rx <= 1; rx++)
+		{
+			for (int ry = -1; ry <= 1; ry++)
+			{
+				if (rx || ry)
+				{
+					int r = pmap[y+ry][x+rx];
+					if (!r)
+						continue;
+					auto nx = x + rx;
+					auto ny = y + ry;
+					while (TYP(r) == PT_FILT)
+					{
+						parts[ID(r)].ctype = 0x10000000 + photonWl;
+						nx += rx;
+						ny += ry;
+						if (nx < 0 || ny < 0 || nx >= XRES || ny >= YRES)
+							break;
+						r = pmap[ny][nx];
+					}
+				}
+			}
+		}
+	}
 	return 0;
 }
-
-
-
-Element_TSNS::~Element_TSNS() {}

@@ -1,14 +1,16 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_YEST PT_YEST 63
-Element_YEST::Element_YEST()
+#include "simulation/ElementCommon.h"
+
+static int update(UPDATE_FUNC_ARGS);
+
+void Element::Element_YEST()
 {
 	Identifier = "DEFAULT_PT_YEST";
 	Name = "YEST";
-	Colour = PIXPACK(0xEEE0C0);
+	Colour = 0xEEE0C0_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_POWDERS;
 	Enabled = 1;
-	
+
 	Advection = 0.7f;
 	AirDrag = 0.02f * CFDS;
 	AirLoss = 0.96f;
@@ -18,21 +20,19 @@ Element_YEST::Element_YEST()
 	Diffusion = 0.00f;
 	HotAir = 0.000f	* CFDS;
 	Falldown = 1;
-	
+
 	Flammable = 15;
 	Explosive = 0;
 	Meltable = 0;
-	Hardness = 30;
-	
+	Hardness = 31;
+
 	Weight = 80;
-	
-	Temperature = R_TEMP+0.0f	+273.15f;
+
 	HeatConduct = 70;
 	Description = "Yeast, grows when warm (~37C).";
-	
-	State = ST_SOLID;
+
 	Properties = TYPE_PART;
-	
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;
@@ -41,32 +41,30 @@ Element_YEST::Element_YEST()
 	LowTemperatureTransition = NT;
 	HighTemperature = 373.0f;
 	HighTemperatureTransition = PT_DYST;
-	
-	Update = &Element_YEST::update;
-	
+
+	Update = &update;
 }
 
-//#TPT-Directive ElementHeader Element_YEST static int update(UPDATE_FUNC_ARGS)
-int Element_YEST::update(UPDATE_FUNC_ARGS)
- {
-	int r, rx, ry;
-	for (rx=-1; rx<2; rx++)
-		for (ry=-1; ry<2; ry++)
-			if (BOUNDS_CHECK && (rx || ry))
+static int update(UPDATE_FUNC_ARGS)
+{
+	for (auto rx = -1; rx <= 1; rx++)
+	{
+		for (auto ry = -1; ry <= 1; ry++)
+		{
+			if (rx || ry)
 			{
-				r = pmap[y+ry][x+rx];
+				auto r = pmap[y+ry][x+rx];
 				if (!r)
 					continue;
-				if ((r&0xFF)==PT_DYST && !(rand()%10) && !sim->legacy_enable)
+				if (TYP(r)==PT_DYST && sim->rng.chance(1, 6) && !sim->legacy_enable)
 				{
 					sim->part_change_type(i,x,y,PT_DYST);
 				}
 			}
-	if (parts[i].temp>303&&parts[i].temp<317) {
-		sim->create_part(-1, x+rand()%3-1, y+rand()%3-1, PT_YEST);
+		}
+	}
+	if (parts[i].temp > 303 && parts[i].temp < 317) {
+		sim->create_part(-1, x + sim->rng.between(-1, 1), y + sim->rng.between(-1, 1), PT_YEST);
 	}
 	return 0;
 }
-
-
-Element_YEST::~Element_YEST() {}

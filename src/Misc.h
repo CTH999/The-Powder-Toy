@@ -1,30 +1,28 @@
-#ifndef UTILS_H
-#define UTILS_H
-#include <stdio.h>
-#include <stdlib.h>
-#include <string>
-#include <sstream>
+#pragma once
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstddef>
 #include <vector>
 
-#if defined(WIN) && !defined(__GNUC__)
-#define x86_cpuid(func,af,bf,cf,df) \
-	do {\
-	__asm mov	eax, func\
-	__asm cpuid\
-	__asm mov	af, eax\
-	__asm mov	bf, ebx\
-	__asm mov	cf, ecx\
-	__asm mov	df, edx\
-	} while(0)
-#else
-#define x86_cpuid(func,af,bf,cf,df) \
-__asm__ __volatile ("cpuid":\
-	"=a" (af), "=b" (bf), "=c" (cf), "=d" (df) : "a" (func));
-#endif
+template<class Signed>
+inline std::pair<Signed, Signed> floorDiv(Signed a, Signed b)
+{
+	auto quo = a / b;
+	auto rem = a % b;
+	if (a < Signed(0) && rem)
+	{
+		quo -= Signed(1);
+		rem += b;
+	}
+	return { quo, rem };
+}
 
-static char hex[] = "0123456789ABCDEF";
-
-char *exe_name(void);
+template<class Signed>
+inline std::pair<Signed, Signed> ceilDiv(Signed a, Signed b)
+{
+	return floorDiv(a + b - Signed(1), b);
+}
 
 //Linear interpolation
 template <typename T> inline T LinearInterpolate(T val1, T val2, T lowerCoord, T upperCoord, T coord)
@@ -33,86 +31,61 @@ template <typename T> inline T LinearInterpolate(T val1, T val2, T lowerCoord, T
 	return (((val2 - val1) / (upperCoord - lowerCoord)) * (coord - lowerCoord)) + val1;
 }
 
+
 //Signum function
-int isign(float i);
-
-unsigned clamp_flt(float f, float min, float max);
-
-float restrict_flt(float f, float min, float max);
-
-char *mystrdup(char *s);
-
-struct strlist
+inline int isign(int i)
 {
-	char *str;
-	struct strlist *next;
-};
+	if (i<0)
+		return -1;
+	if (i>0)
+		return 1;
+	return 0;
+}
 
-void strlist_add(struct strlist **list, char *str);
+inline int isign(float i)
+{
+	if (i<0)
+		return -1;
+	if (i>0)
+		return 1;
+	return 0;
+}
 
-int strlist_find(struct strlist **list, char *str);
+inline int iabs(int i)
+{
+	return i * isign(i);
+}
 
-void strlist_free(struct strlist **list);
+inline unsigned clamp_flt(float f, float min, float max)
+{
+	if (f<min)
+		return 0;
+	if (f>max)
+		return 255;
+	return (int)(255.0f*(f-min)/(max-min));
+}
 
-void save_presets(int do_update);
-
-void clean_text(char *text, int vwidth);
-
-void load_presets(void);
-
-void save_string(FILE *f, char *str);
-
-int sregexp(const char *str, char *pattern);
-
-int load_string(FILE *f, char *str, int max);
-
-void strcaturl(char *dst, char *src);
-
-std::string URLEscape(std::string source);
-
-void strappend(char *dst, char *src);
-
-void *file_load(char *fn, int *size);
-
-extern char *clipboard_text;
-
-int register_extension();
-
-int cpu_check(void);
+inline float restrict_flt(float f, float min, float max)
+{
+	// Fix crash in certain cases when f is nan
+	if (!std::isfinite(f))
+		return min;
+	if (f < min)
+		return min;
+	if (f > max)
+		return max;
+	return f;
+}
 
 void HSV_to_RGB(int h,int s,int v,int *r,int *g,int *b);
-
 void RGB_to_HSV(int r,int g,int b,int *h,int *s,int *v);
 
-void OpenURI(std::string uri);
+class ByteString;
 
-void membwand(void * dest, void * src, size_t destsize, size_t srcsize);
-// a b
-// c d
-
-struct matrix2d {
-	float a,b,c,d;
-};
-typedef struct matrix2d matrix2d;
-
-// column vector
-struct vector2d {
-	float x,y;
-};
-typedef struct vector2d vector2d;
-
-matrix2d m2d_multiply_m2d(matrix2d m1, matrix2d m2);
-vector2d m2d_multiply_v2d(matrix2d m, vector2d v);
-matrix2d m2d_multiply_float(matrix2d m, float s);
-vector2d v2d_multiply_float(vector2d v, float s);
-
-vector2d v2d_add(vector2d v1, vector2d v2);
-vector2d v2d_sub(vector2d v1, vector2d v2);
-
-matrix2d m2d_new(float me0, float me1, float me2, float me3);
-vector2d v2d_new(float x, float y);
-
-extern vector2d v2d_zero;
-extern matrix2d m2d_identity;
-
-#endif
+bool byteStringEqualsString(const ByteString &str, const char *data, size_t size);
+template<size_t N>
+// TODO: use std::literals::string_literals::operator""s if we get rid of ByteString
+bool byteStringEqualsLiteral(const ByteString &str, const char (&lit)[N])
+{
+	return byteStringEqualsString(str, lit, N - 1U);
+}

@@ -1,73 +1,89 @@
 #include "SaveFile.h"
 #include "GameSave.h"
-#include "Client.h"
-#include "search/Thumbnail.h"
+#include "common/platform/Platform.h"
 
-SaveFile::SaveFile(SaveFile & save):
-	gameSave(NULL),
-	thumbnail(NULL),
-	filename(save.filename),
-	displayName(save.displayName)
-{
-	if(save.gameSave)
-		gameSave = new GameSave(*save.gameSave);
-	if(save.thumbnail)
-		thumbnail = new Thumbnail(*save.thumbnail);
-}
-
-Thumbnail * SaveFile::GetThumbnail()
-{
-	return thumbnail;
-}
-
-void SaveFile::SetThumbnail(Thumbnail * thumb)
-{
-	thumbnail = thumb;
-}
-
-SaveFile::SaveFile(std::string filename):
-		filename(filename),
-		displayName(filename),
-		gameSave(NULL),
-		thumbnail(NULL)
+SaveFile::SaveFile(ByteString filename, bool newLazyLoad):
+	filename(filename),
+	displayName(filename.FromUtf8()),
+	loadingError(""),
+	lazyLoad(newLazyLoad)
 {
 
 }
 
-GameSave * SaveFile::GetGameSave()
+const GameSave *SaveFile::LazyGetGameSave() // non-owning
 {
-	return gameSave;
+	if (!gameSave && !loadingError.size() && lazyLoad)
+	{
+		try
+		{
+			std::vector<char> data;
+			if (Platform::ReadFile(data, filename))
+			{
+				gameSave = std::make_unique<GameSave>(std::move(data));
+			}
+			else
+			{
+				loadingError = "cannot access file";
+			}
+		}
+		catch(std::exception & e)
+		{
+			loadingError = ByteString(e.what()).FromUtf8();
+		}
+	}
+	return gameSave.get();
 }
 
-void SaveFile::SetGameSave(GameSave * save)
+const GameSave *SaveFile::GetGameSave() const
 {
-	gameSave = save;
+	return gameSave.get();
 }
 
-std::string SaveFile::GetName()
+std::unique_ptr<GameSave> SaveFile::TakeGameSave()
+{
+	return std::move(gameSave);
+}
+
+void SaveFile::LazyUnload()
+{
+	if (lazyLoad)
+	{
+		gameSave.reset();
+	}
+}
+
+void SaveFile::SetGameSave(std::unique_ptr<GameSave> newGameSave)
+{
+	gameSave = std::move(newGameSave);
+}
+
+const ByteString &SaveFile::GetName() const
 {
 	return filename;
 }
 
-void SaveFile::SetFileName(std::string fileName)
+void SaveFile::SetFileName(ByteString fileName)
 {
 	this->filename = fileName;
 }
 
-std::string SaveFile::GetDisplayName()
+const String &SaveFile::GetDisplayName() const
 {
 	return displayName;
 }
 
-void SaveFile::SetDisplayName(std::string displayName)
+void SaveFile::SetDisplayName(String displayName)
 {
 	this->displayName = displayName;
 }
 
-SaveFile::~SaveFile() {
-	if(gameSave)
-		delete gameSave;
-	if(thumbnail)
-		delete thumbnail;
+const String &SaveFile::GetError() const
+{
+	return loadingError;
 }
 
+void SaveFile::SetLoadingError(String error)
+{
+	loadingError = error;
+}
