@@ -1,10 +1,14 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_WARP PT_WARP 96
-Element_WARP::Element_WARP()
+#include "simulation/ElementCommon.h"
+
+static int update(UPDATE_FUNC_ARGS);
+static int graphics(GRAPHICS_FUNC_ARGS);
+static void create(ELEMENT_CREATE_FUNC_ARGS);
+
+void Element::Element_WARP()
 {
 	Identifier = "DEFAULT_PT_WARP";
 	Name = "WARP";
-	Colour = PIXPACK(0x101010);
+	Colour = 0x101010_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_NUCLEAR;
 	Enabled = 1;
@@ -26,7 +30,6 @@ Element_WARP::Element_WARP()
 
 	Weight = 1;
 
-	Temperature = R_TEMP +273.15f;
 	HeatConduct = 100;
 	Description = "Displaces other elements.";
 
@@ -41,41 +44,40 @@ Element_WARP::Element_WARP()
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
 
-	Update = &Element_WARP::update;
-	Graphics = &Element_WARP::graphics;
+	Update = &update;
+	Graphics = &graphics;
+	Create = &create;
 }
 
-//#TPT-Directive ElementHeader Element_WARP static int update(UPDATE_FUNC_ARGS)
-int Element_WARP::update(UPDATE_FUNC_ARGS)
+static int update(UPDATE_FUNC_ARGS)
 {
-	int trade, r, rx, ry;
-	if (parts[i].tmp2>2000)
+	if (parts[i].tmp2 > 2000)
 	{
 		parts[i].temp = 10000;
-		sim->pv[y/CELL][x/CELL] += (parts[i].tmp2/5000) * CFDS;
-		if (RNG::Ref().chance(1, 50))
+		sim->pv[y/CELL][x/CELL] += (parts[i].tmp2 / 5000) * CFDS;
+		if (sim->rng.chance(1, 50))
 			sim->create_part(-3, x, y, PT_ELEC);
 	}
-	for ( trade = 0; trade<5; trade ++)
+	for (int trade = 0; trade < 5; trade ++)
 	{
-		rx = RNG::Ref().between(-1, 1);
-		ry = RNG::Ref().between(-1, 1);
-		if (BOUNDS_CHECK && (rx || ry))
+		int rx = sim->rng.between(-1, 1);
+		int ry = sim->rng.between(-1, 1);
+		if (rx || ry)
 		{
-			r = pmap[y+ry][x+rx];
+			int r = pmap[y + ry][x + rx];
 			if (!r)
 				continue;
-			if (TYP(r)!=PT_WARP&&TYP(r)!=PT_STKM&&TYP(r)!=PT_STKM2&&TYP(r)!=PT_DMND&&TYP(r)!=PT_CLNE&&TYP(r)!=PT_BCLN&&TYP(r)!=PT_PCLN)
+			if (TYP(r) != PT_WARP && TYP(r) != PT_STKM && TYP(r) != PT_STKM2 && TYP(r) != PT_DMND && TYP(r) != PT_CLNE && TYP(r) != PT_BCLN && TYP(r) != PT_PCLN)
 			{
 				parts[i].x = parts[ID(r)].x;
 				parts[i].y = parts[ID(r)].y;
-				parts[ID(r)].x = x;
-				parts[ID(r)].y = y;
-				parts[ID(r)].vx = RNG::Ref().chance(-2, 1) + 0.5f;
-				parts[ID(r)].vy = RNG::Ref().between(-2, 1);
+				parts[ID(r)].x = float(x);
+				parts[ID(r)].y = float(y);
+				parts[ID(r)].vx = sim->rng.between(-2, 1) + 0.5f;
+				parts[ID(r)].vy = float(sim->rng.between(-2, 1));
 				parts[i].life += 4;
 				pmap[y][x] = r;
-				pmap[y+ry][x+rx] = PMAP(i, parts[i].type);
+				pmap[y + ry][x + rx] = PMAP(i, parts[i].type);
 				trade = 5;
 			}
 		}
@@ -83,12 +85,14 @@ int Element_WARP::update(UPDATE_FUNC_ARGS)
 	return 0;
 }
 
-//#TPT-Directive ElementHeader Element_WARP static int graphics(GRAPHICS_FUNC_ARGS)
-int Element_WARP::graphics(GRAPHICS_FUNC_ARGS)
+static int graphics(GRAPHICS_FUNC_ARGS)
 {
 	*colr = *colg = *colb = *cola = 0;
-	*pixel_mode &= ~PMODE;
+	*pixel_mode |= NO_DECO;
 	return 0;
 }
 
-Element_WARP::~Element_WARP() {}
+static void create(ELEMENT_CREATE_FUNC_ARGS)
+{
+	sim->parts[i].life = sim->rng.between(70, 164);
+}

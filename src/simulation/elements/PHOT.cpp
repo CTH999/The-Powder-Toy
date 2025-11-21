@@ -1,10 +1,16 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_PHOT PT_PHOT 31
-Element_PHOT::Element_PHOT()
+#include "simulation/ElementCommon.h"
+#include "FIRE.h"
+#include "FILT.h"
+
+static int update(UPDATE_FUNC_ARGS);
+static int graphics(GRAPHICS_FUNC_ARGS);
+static void create(ELEMENT_CREATE_FUNC_ARGS);
+
+void Element::Element_PHOT()
 {
 	Identifier = "DEFAULT_PT_PHOT";
 	Name = "PHOT";
-	Colour = PIXPACK(0xFFFFFF);
+	Colour = 0xFFFFFF_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_NUCLEAR;
 	Enabled = 1;
@@ -26,11 +32,11 @@ Element_PHOT::Element_PHOT()
 
 	Weight = -1;
 
-	Temperature = R_TEMP+900.0f+273.15f;
+	DefaultProperties.temp = R_TEMP + 900.0f + 273.15f;
 	HeatConduct = 251;
-	Description = "Photons. Refracts through glass, scattered by quartz, and color-changed by different elements. Ignites flammable materials.";
+	Description = "Photons. Refract through glass, and different elements change its color. Can ignite flammable materials.";
 
-	Properties = TYPE_ENERGY|PROP_LIFE_DEC|PROP_LIFE_KILL_DEC;
+	Properties = TYPE_ENERGY | PROP_PHOTPASS | PROP_LIFE_DEC | PROP_LIFE_KILL_DEC;
 
 	LowPressure = IPL;
 	LowPressureTransition = NT;
@@ -41,78 +47,104 @@ Element_PHOT::Element_PHOT()
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
 
-	Update = &Element_PHOT::update;
-	Graphics = &Element_PHOT::graphics;
+	DefaultProperties.life = 680;
+	DefaultProperties.ctype = 0x3FFFFFFF;
+
+	Update = &update;
+	Graphics = &graphics;
+	Create = &create;
 }
 
-//#TPT-Directive ElementHeader Element_PHOT static int update(UPDATE_FUNC_ARGS)
-int Element_PHOT::update(UPDATE_FUNC_ARGS)
+static int update(UPDATE_FUNC_ARGS)
 {
-	int r, rx, ry;
-	float rr, rrr;
+	auto &sd = SimulationData::CRef();
+	auto &elements = sd.elements;
+
 	if (!(parts[i].ctype&0x3FFFFFFF)) {
 		sim->kill_part(i);
 		return 1;
 	}
 	if (parts[i].temp > 506)
-		if (RNG::Ref().chance(1, 10))
-			Element_FIRE::update(UPDATE_FUNC_SUBCALL_ARGS);
-	for (rx=-1; rx<2; rx++)
-		for (ry=-1; ry<2; ry++)
-			if (BOUNDS_CHECK) {
-				r = pmap[y+ry][x+rx];
-				if (!r)
-					continue;
-				if (TYP(r)==PT_ISOZ || TYP(r)==PT_ISZS)
+		if (sim->rng.chance(1, 10))
+			Element_FIRE_update(UPDATE_FUNC_SUBCALL_ARGS);
+	for (auto rx = -1; rx <= 1; rx++)
+	{
+		for (auto ry = -1; ry <= 1; ry++)
+		{
+			auto r = pmap[y+ry][x+rx];
+			if (!r)
+				continue;
+			if (TYP(r)==PT_ISOZ || TYP(r)==PT_ISZS)
+			{
+				if (sim->rng.chance(1, 400))
 				{
-					if (RNG::Ref().chance(1, 400))
-					{
-						parts[i].vx *= 0.90;
-						parts[i].vy *= 0.90;
-						sim->create_part(ID(r), x+rx, y+ry, PT_PHOT);
-						rrr = RNG::Ref().between(0, 359) * 3.14159f / 180.0f;
-						if (TYP(r) == PT_ISOZ)
-							rr = RNG::Ref().between(128, 255) / 127.0f;
-						else
-							rr = RNG::Ref().between(128, 355) / 127.0f;
-						parts[ID(r)].vx = rr*cosf(rrr);
-						parts[ID(r)].vy = rr*sinf(rrr);
-						sim->pv[y/CELL][x/CELL] -= 15.0f * CFDS;
-					}
-				}
-				else if((TYP(r) == PT_QRTZ || TYP(r) == PT_PQRT) && !ry && !rx)//if on QRTZ
-				{
-					float a = RNG::Ref().between(0, 359) * 3.14159f / 180.0f;
-					parts[i].vx = 3.0f*cosf(a);
-					parts[i].vy = 3.0f*sinf(a);
-					if(parts[i].ctype == 0x3FFFFFFF)
-						parts[i].ctype = 0x1F << RNG::Ref().between(0, 25);
-					if (parts[i].life)
-						parts[i].life++; //Delay death
-				}
-				else if(TYP(r) == PT_BGLA && !ry && !rx)//if on BGLA
-				{
-					float a = RNG::Ref().between(-50, 50) * 0.001f;
-					float rx = cosf(a), ry = sinf(a), vx, vy;
-					vx = rx * parts[i].vx + ry * parts[i].vy;
-					vy = rx * parts[i].vy - ry * parts[i].vx;
-					parts[i].vx = vx;
-					parts[i].vy = vy;
-				}
-				else if (TYP(r) == PT_FILT && parts[ID(r)].tmp==9)
-				{
-					parts[i].vx += ((float)RNG::Ref().between(-500, 500))/1000.0f;
-					parts[i].vy += ((float)RNG::Ref().between(-500, 500))/1000.0f;
+					parts[i].vx *= 0.90f;
+					parts[i].vy *= 0.90f;
+					sim->create_part(ID(r), x+rx, y+ry, PT_PHOT);
+					auto rrr = sim->rng.between(0, 359) * 3.14159f / 180.0f;
+					int rr;
+					if (TYP(r) == PT_ISOZ)
+						rr = int(sim->rng.between(128, 255) / 127.0f);
+					else
+						rr = int(sim->rng.between(128, 355) / 127.0f);
+					parts[ID(r)].vx = rr*cosf(rrr);
+					parts[ID(r)].vy = rr*sinf(rrr);
+					sim->pv[y/CELL][x/CELL] -= 15.0f * CFDS;
 				}
 			}
+			else if((TYP(r) == PT_QRTZ || TYP(r) == PT_PQRT) && !ry && !rx)//if on QRTZ
+			{
+				float a = sim->rng.between(0, 359) * 3.14159f / 180.0f;
+				parts[i].vx = 3.0f*cosf(a);
+				parts[i].vy = 3.0f*sinf(a);
+				if(parts[i].ctype == 0x3FFFFFFF)
+					parts[i].ctype = 0x1F << sim->rng.between(0, 25);
+				if (parts[i].life)
+					parts[i].life++; //Delay death
+			}
+			else if(TYP(r) == PT_BGLA && !ry && !rx)//if on BGLA
+			{
+				float a = sim->rng.between(-50, 50) * 0.001f;
+				float rx = cosf(a), ry = sinf(a), vx, vy;
+				vx = rx * parts[i].vx + ry * parts[i].vy;
+				vy = rx * parts[i].vy - ry * parts[i].vx;
+				parts[i].vx = vx;
+				parts[i].vy = vy;
+			}
+			else if(TYP(r) == PT_RSST && !ry && !rx)//if on RSST, make it solid
+			{
+				int ct_under, tmp_under;
+
+				ct_under = parts[ID(r)].ctype;
+				tmp_under = parts[ID(r)].tmp;
+
+				//If there's a correct ctype set, solidify RSST into it
+				if(ct_under > 0 && ct_under < PT_NUM)
+				{
+					sim->create_part(ID(r), x, y, ct_under);
+
+					//If there's a correct tmp set, use it for ctype
+					if((tmp_under > 0) && (tmp_under < PT_NUM) && (elements[ct_under].CarriesTypeIn & (1U << FIELD_CTYPE)))
+						parts[ID(r)].ctype = tmp_under;
+				}
+				else
+					sim->part_change_type(ID(r), x, y, PT_RSSS); //Default to RSSS if no ctype
+
+				sim->kill_part(i);
+
+				return 1;
+			}
+			else if (TYP(r) == PT_FILT && parts[ID(r)].tmp==9)
+			{
+				parts[i].vx += ((float)sim->rng.between(-500, 500))/1000.0f;
+				parts[i].vy += ((float)sim->rng.between(-500, 500))/1000.0f;
+			}
+		}
+	}
 	return 0;
 }
 
-
-
-//#TPT-Directive ElementHeader Element_PHOT static int graphics(GRAPHICS_FUNC_ARGS)
-int Element_PHOT::graphics(GRAPHICS_FUNC_ARGS)
-
+static int graphics(GRAPHICS_FUNC_ARGS)
 {
 	int x = 0;
 	*colr = *colg = *colb = 0;
@@ -141,5 +173,11 @@ int Element_PHOT::graphics(GRAPHICS_FUNC_ARGS)
 	return 0;
 }
 
-
-Element_PHOT::~Element_PHOT() {}
+static void create(ELEMENT_CREATE_FUNC_ARGS)
+{
+	float a = sim->rng.between(0, 7) * 0.78540f;
+	sim->parts[i].vx = 3.0f * cosf(a);
+	sim->parts[i].vy = 3.0f * sinf(a);
+	if (TYP(sim->pmap[y][x]) == PT_FILT)
+		sim->parts[i].ctype = Element_FILT_interactWavelengths(sim, &sim->parts[ID(sim->pmap[y][x])], sim->parts[i].ctype);
+}

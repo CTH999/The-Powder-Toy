@@ -1,10 +1,17 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_PRTI PT_PRTI 109
-Element_PRTI::Element_PRTI()
+#include "simulation/ElementCommon.h"
+#include "simulation/orbitalparts.h"
+#include "PIPE.h"
+#include "SOAP.h"
+#include "PRTI.h"
+
+static int update(UPDATE_FUNC_ARGS);
+static int graphics(GRAPHICS_FUNC_ARGS);
+
+void Element::Element_PRTI()
 {
 	Identifier = "DEFAULT_PT_PRTI";
 	Name = "PRTI";
-	Colour = PIXPACK(0xEB5917);
+	Colour = 0xEB5917_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_SPECIAL;
 	Enabled = 1;
@@ -26,7 +33,6 @@ Element_PRTI::Element_PRTI()
 
 	Weight = 100;
 
-	Temperature = R_TEMP+0.0f	+273.15f;
 	HeatConduct = 0;
 	Description = "Portal IN. Particles go in here. Also has temperature dependent channels. (same as WIFI)";
 
@@ -41,8 +47,8 @@ Element_PRTI::Element_PRTI()
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
 
-	Update = &Element_PRTI::update;
-	Graphics = &Element_PRTI::graphics;
+	Update = &update;
+	Graphics = &graphics;
 }
 
 /*these are the count values of where the particle gets stored, depending on where it came from
@@ -53,9 +59,10 @@ Element_PRTI::Element_PRTI()
    PRTO does +/-1 to the count, so it doesn't jam as easily
 */
 
-//#TPT-Directive ElementHeader Element_PRTI static int update(UPDATE_FUNC_ARGS)
-int Element_PRTI::update(UPDATE_FUNC_ARGS)
+static int update(UPDATE_FUNC_ARGS)
 {
+	auto &sd = SimulationData::CRef();
+	auto &elements = sd.elements;
 	int fe = 0;
 
 	parts[i].tmp = (int)((parts[i].temp-73.15f)/100+1);
@@ -66,14 +73,14 @@ int Element_PRTI::update(UPDATE_FUNC_ARGS)
 
 	for (int count = 0; count < 8; count++)
 	{
-		int rx = sim->portal_rx[count];
-		int ry = sim->portal_ry[count];
-		if (BOUNDS_CHECK && (rx || ry))
+		int rx = portal_rx[count];
+		int ry = portal_ry[count];
+		if (rx || ry)
 		{
 			int r = pmap[y+ry][x+rx];
 			if (!r || TYP(r) == PT_STOR)
 				fe = 1;
-			if (!r || (!(sim->elements[TYP(r)].Properties & (TYPE_PART | TYPE_LIQUID | TYPE_GAS | TYPE_ENERGY)) && TYP(r)!=PT_SPRK && TYP(r)!=PT_STOR))
+			if (!r || (!(elements[TYP(r)].Properties & (TYPE_PART | TYPE_LIQUID | TYPE_GAS | TYPE_ENERGY)) && TYP(r)!=PT_SPRK && TYP(r)!=PT_STOR))
 			{
 				r = sim->photons[y+ry][x+rx];
 				if (!r)
@@ -84,17 +91,17 @@ int Element_PRTI::update(UPDATE_FUNC_ARGS)
 				continue;// Handling these is a bit more complicated, and is done in STKM_interact()
 
 			if (TYP(r) == PT_SOAP)
-				Element_SOAP::detach(sim, ID(r));
+				Element_SOAP_detach(sim, ID(r));
 
 			for (int nnx=0; nnx<80; nnx++)
 				if (!sim->portalp[parts[i].tmp][count][nnx].type)
 				{
 					if (TYP(r) == PT_STOR)
 					{
-						if (sim->IsValidElement(parts[ID(r)].tmp) && (sim->elements[parts[ID(r)].tmp].Properties & (TYPE_PART | TYPE_LIQUID | TYPE_GAS | TYPE_ENERGY)))
+						if (sd.IsElement(parts[ID(r)].tmp) && (elements[parts[ID(r)].tmp].Properties & (TYPE_PART | TYPE_LIQUID | TYPE_GAS | TYPE_ENERGY)))
 						{
 							// STOR uses same format as PIPE, so we can use this function to do the transfer
-							Element_PIPE::transfer_pipe_to_part(sim, parts+(ID(r)), &sim->portalp[parts[i].tmp][count][nnx], true);
+							Element_PIPE_transfer_pipe_to_part(sim, parts+(ID(r)), &sim->portalp[parts[i].tmp][count][nnx], true);
 							break;
 						}
 					}
@@ -116,25 +123,25 @@ int Element_PRTI::update(UPDATE_FUNC_ARGS)
 	if (fe) {
 		int orbd[4] = {0, 0, 0, 0};	//Orbital distances
 		int orbl[4] = {0, 0, 0, 0};	//Orbital locations
-		if (!sim->parts[i].life) parts[i].life = RNG::Ref().gen();
-		if (!sim->parts[i].ctype) parts[i].ctype = RNG::Ref().gen();
-		sim->orbitalparts_get(parts[i].life, parts[i].ctype, orbd, orbl);
+		if (!sim->parts[i].life) parts[i].life = sim->rng.gen();
+		if (!sim->parts[i].ctype) parts[i].ctype = sim->rng.gen();
+		orbitalparts_get(parts[i].life, parts[i].ctype, orbd, orbl);
 		for (int r = 0; r < 4; r++) {
 			if (orbd[r]>1) {
 				orbd[r] -= 12;
 				if (orbd[r]<1) {
-					orbd[r] = RNG::Ref().between(128, 255);
-					orbl[r] = RNG::Ref().between(0, 254);
+					orbd[r] = sim->rng.between(128, 255);
+					orbl[r] = sim->rng.between(0, 254);
 				} else {
 					orbl[r] += 2;
 					orbl[r] = orbl[r]%255;
 				}
 			} else {
-				orbd[r] = RNG::Ref().between(128, 255);
-				orbl[r] = RNG::Ref().between(0, 254);
+				orbd[r] = sim->rng.between(128, 255);
+				orbl[r] = sim->rng.between(0, 254);
 			}
 		}
-		sim->orbitalparts_set(&parts[i].life, &parts[i].ctype, orbd, orbl);
+		orbitalparts_set(&parts[i].life, &parts[i].ctype, orbd, orbl);
 	} else {
 		parts[i].life = 0;
 		parts[i].ctype = 0;
@@ -142,10 +149,7 @@ int Element_PRTI::update(UPDATE_FUNC_ARGS)
 	return 0;
 }
 
-
-//#TPT-Directive ElementHeader Element_PRTI static int graphics(GRAPHICS_FUNC_ARGS)
-int Element_PRTI::graphics(GRAPHICS_FUNC_ARGS)
-
+static int graphics(GRAPHICS_FUNC_ARGS)
 {
 	*firea = 8;
 	*firer = 255;
@@ -157,6 +161,3 @@ int Element_PRTI::graphics(GRAPHICS_FUNC_ARGS)
 	*pixel_mode |= PMODE_ADD;
 	return 1;
 }
-
-
-Element_PRTI::~Element_PRTI() {}

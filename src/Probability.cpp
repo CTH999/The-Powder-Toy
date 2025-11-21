@@ -13,10 +13,10 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <numeric>
-#include <cstdlib>
 #include "Probability.h"
 #include "common/tpt-rand.h"
+#include <numeric>
+#include <cstdlib>
 
 namespace Probability
 {

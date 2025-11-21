@@ -1,7 +1,5 @@
-#ifndef STYLE_H_
-#define STYLE_H_
-
-namespace ui { class Colour; }
+#pragma once
+#include "gui/interface/Colour.h"
 
 namespace style
 {
@@ -20,9 +18,8 @@ namespace style
 		static ui::Colour ActiveBackground;
 		static ui::Colour InactiveBackground;
 	};
+	
 	class Metrics
 	{
 	};
 }
-
-#endif
