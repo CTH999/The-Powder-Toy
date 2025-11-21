@@ -1,7 +1,5 @@
-#ifndef USER_H_
-#define USER_H_
-
-#include <string>
+#pragma once
+#include "common/String.h"
 
 
 class User
@@ -9,14 +7,20 @@ class User
 public:
 	enum Elevation
 	{
-		ElevationAdmin, ElevationModerator, ElevationNone
+		ElevationNone,
+		ElevationHalfMod,
+		ElevationMod,
+		ElevationAdmin,
 	};
+	static Elevation ElevationFromString(ByteString str);
+	static ByteString ElevationToString(Elevation elevation);
+
 	int UserID;
-	std::string Username;
-	std::string SessionID;
-	std::string SessionKey;
+	ByteString Username;
+	ByteString SessionID;
+	ByteString SessionKey;
 	Elevation UserElevation;
-	User(int id, std::string username):
+	User(int id, ByteString username):
 		UserID(id),
 		Username(username),
 		SessionID(""),
@@ -27,5 +31,3 @@ public:
 	}
 };
 
-
-#endif /* USER_H_ */

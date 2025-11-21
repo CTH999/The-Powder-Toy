@@ -1,10 +1,10 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_DMND PT_DMND 28
-Element_DMND::Element_DMND()
+#include "simulation/ElementCommon.h"
+
+void Element::Element_DMND()
 {
 	Identifier = "DEFAULT_PT_DMND";
 	Name = "DMND";
-	Colour = PIXPACK(0xCCFFFF);
+	Colour = 0xCCFFFF_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_SPECIAL;
 	Enabled = 1;
@@ -26,7 +26,6 @@ Element_DMND::Element_DMND()
 
 	Weight = 100;
 
-	Temperature = R_TEMP+0.0f	+273.15f;
 	HeatConduct = 186;
 	Description = "Diamond. Indestructible.";
 
@@ -40,8 +39,4 @@ Element_DMND::Element_DMND()
 	LowTemperatureTransition = NT;
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
-
-	Update = NULL;
 }
-
-Element_DMND::~Element_DMND() {}

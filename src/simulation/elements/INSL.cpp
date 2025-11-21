@@ -1,10 +1,10 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_INSL PT_INSL 38
-Element_INSL::Element_INSL()
+#include "simulation/ElementCommon.h"
+
+void Element::Element_INSL()
 {
 	Identifier = "DEFAULT_PT_INSL";
 	Name = "INSL";
-	Colour = PIXPACK(0x9EA3B6);
+	Colour = 0x9EA3B6_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_ELEC;
 	Enabled = 1;
@@ -26,9 +26,8 @@ Element_INSL::Element_INSL()
 
 	Weight = 100;
 
-	Temperature = R_TEMP+0.0f	+273.15f;
 	HeatConduct = 0;
-	Description = "Insulator, does not conduct heat and blocks electricity.";
+	Description = "Insulator. Blocks heat, electricity, and radiation.";
 
 	Properties = TYPE_SOLID;
 
@@ -40,8 +39,4 @@ Element_INSL::Element_INSL()
 	LowTemperatureTransition = NT;
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
-
-	Update = NULL;
 }
-
-Element_INSL::~Element_INSL() {}

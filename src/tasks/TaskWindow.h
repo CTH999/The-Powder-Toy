@@ -1,31 +1,32 @@
-#ifndef TASKWINDOW_H_
-#define TASKWINDOW_H_
-
-#include <string>
-#include "gui/interface/Label.h"
+#pragma once
 #include "gui/interface/Window.h"
 #include "tasks/TaskListener.h"
+#include <memory>
+
+namespace ui
+{
+	class Label;
+	class ProgressBar;
+}
 
 class Task;
 class TaskWindow: public ui::Window, public TaskListener {
-	Task * task;
-	std::string title;
+	std::unique_ptr<Task> task;
+	String title;
 	int progress;
 	float intermediatePos;
 	bool done;
 	bool closeOnDone;
-	ui::Label * statusLabel;
-	std::string progressStatus;
+	ui::Label *statusLabel{};
+	ui::ProgressBar *progressBar{};
+	String progressStatus;
 public:
-	TaskWindow(std::string title_, Task * task_, bool closeOnDone = true);
-	virtual void NotifyStatus(Task * task);
-	virtual void NotifyDone(Task * task);
-	virtual void NotifyProgress(Task * task);
-	virtual void NotifyError(Task * task);
-	virtual void OnTick(float dt);
-	virtual void OnDraw();
-	virtual void Exit();
-	virtual ~TaskWindow();
+	TaskWindow(String title_, Task * task_, bool closeOnDone = true);
+	void NotifyStatus(Task * task) override;
+	void NotifyDone(Task * task) override;
+	void NotifyProgress(Task * task) override;
+	void NotifyError(Task * task) override;
+	void OnTick() override;
+	void OnDraw() override;
+	void Exit();
 };
-
-#endif /* TASKWINDOW_H_ */

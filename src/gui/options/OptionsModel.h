@@ -1,13 +1,12 @@
-#ifndef OPTIONSMODEL_H_
-#define OPTIONSMODEL_H_
+#pragma once
 #include <vector>
-#include "OptionsView.h"
-#include "simulation/Simulation.h"
+#include "simulation/SimulationSettings.h"
 
 class GameModel;
 class Simulation;
 class OptionsView;
-class OptionsModel {
+class OptionsModel
+{
 	GameModel * gModel;
 	Simulation * sim;
 	std::vector<OptionsView*> observers;
@@ -27,17 +26,55 @@ public:
 	void SetShowAvatars(bool state);
 	int GetAirMode();
 	void SetAirMode(int airMode);
+	float GetAmbientAirTemperature();
+	void SetAmbientAirTemperature(float ambientAirTemp);
+	float GetVorticityCoeff();
+	void SetVorticityCoeff(float vorticityCoeff);
 	int GetEdgeMode();
 	void SetEdgeMode(int edgeMode);
+	TempScale GetTemperatureScale();
+	void SetTemperatureScale(TempScale temperatureScale);
+	int GetThreadedRendering();
+	void SetThreadedRendering(bool newThreadedRendering);
 	int GetGravityMode();
 	void SetGravityMode(int gravityMode);
+	float GetCustomGravityX();
+	void SetCustomGravityX(float x);
+	float GetCustomGravityY();
+	void SetCustomGravityY(float y);
 	int GetScale();
 	void SetScale(int scale);
+	bool GetGraveExitsConsole();
+	void SetGraveExitsConsole(bool graveExitsConsole);
+	bool GetNativeClipoard();
+	void SetNativeClipoard(bool nativeClipoard);
+	bool GetResizable();
+	void SetResizable(bool resizable);
 	bool GetFullscreen();
 	void SetFullscreen(bool fullscreen);
+	bool GetChangeResolution();
+	void SetChangeResolution(bool newChangeResolution);
+	bool GetForceIntegerScaling();
+	void SetForceIntegerScaling(bool forceIntegerScaling);
+	bool GetBlurryScaling();
+	void SetBlurryScaling(bool newBlurryScaling);
 	bool GetFastQuit();
 	void SetFastQuit(bool fastquit);
+	bool GetGlobalQuit();
+	void SetGlobalQuit(bool newGlobalQuit);
+	int GetDecoSpace();
+	void SetDecoSpace(int decoSpace);
+	bool GetMouseClickRequired();
+	void SetMouseClickRequired(bool mouseClickRequired);
+	bool GetIncludePressure();
+	void SetIncludePressure(bool includePressure);
+	bool GetPerfectCircle();
+	void SetPerfectCircle(bool perfectCircle);
+	bool GetMomentumScroll();
+	void SetMomentumScroll(bool momentumScroll);
+	bool GetRedirectStd();
+	void SetRedirectStd(bool newRedirectStd);
+	bool GetAutoStartupRequest();
+	void SetAutoStartupRequest(bool newAutoStartupRequest);
 	virtual ~OptionsModel();
 };
-
-#endif /* OPTIONSMODEL_H_ */

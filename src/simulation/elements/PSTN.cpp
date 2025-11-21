@@ -1,12 +1,18 @@
-#include "common/tpt-minmax.h"
-#include "simulation/Elements.h"
+#include "simulation/ElementCommon.h"
+#include <algorithm>
 
-//#TPT-Directive ElementClass Element_PSTN PT_PSTN 168
-Element_PSTN::Element_PSTN()
+struct StackData;
+static int update(UPDATE_FUNC_ARGS);
+static int graphics(GRAPHICS_FUNC_ARGS);
+static bool ctypeDraw(CTYPEDRAW_FUNC_ARGS);
+static StackData CanMoveStack(Simulation * sim, int stackX, int stackY, int directionX, int directionY, int maxSize, int amount, bool retract, int block);
+static int MoveStack(Simulation * sim, int stackX, int stackY, int directionX, int directionY, int maxSize, int amount, bool retract, int block, bool sticky, int callDepth = 0);
+
+void Element::Element_PSTN()
 {
 	Identifier = "DEFAULT_PT_PSTN";
 	Name = "PSTN";
-	Colour = PIXPACK(0xAA9999);
+	Colour = 0xAA9999_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_FORCE;
 	Enabled = 1;
@@ -28,11 +34,12 @@ Element_PSTN::Element_PSTN()
 
 	Weight = 100;
 
-	Temperature = 283.15f;
+	DefaultProperties.temp = 10.0f + 273.15f;
 	HeatConduct = 0;
-	Description = "Piston, extends and pushes particles.";
+	Description = "Piston, pushes particles. PSCN extends, NSCN retracts";
 
 	Properties = TYPE_SOLID;
+	CarriesTypeIn = 1U << FIELD_CTYPE;
 
 	LowPressure = IPL;
 	LowPressureTransition = NT;
@@ -43,16 +50,16 @@ Element_PSTN::Element_PSTN()
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
 
-	Update = &Element_PSTN::update;
-	Graphics = &Element_PSTN::graphics;
+	Update = &update;
+	Graphics = &graphics;
+	CtypeDraw = &ctypeDraw;
 }
 
-//#TPT-Directive ElementHeader Element_PSTN struct StackData
-struct Element_PSTN::StackData
+struct StackData
 {
 	int pushed;
 	int spaces;
-	
+
 	StackData(int pushed, int spaces):
 		pushed(pushed),
 		spaces(spaces)
@@ -60,32 +67,30 @@ struct Element_PSTN::StackData
 	}
 };
 
-//#TPT-Directive ElementHeader Element_PSTN static int tempParts[XRES]
-int Element_PSTN::tempParts[XRES];
+constexpr int PISTON_INACTIVE   = 0x00;
+constexpr int PISTON_RETRACT    = 0x01;
+constexpr int PISTON_EXTEND     = 0x02;
+constexpr int MAX_FRAME         = 0x0F;
+constexpr int DEFAULT_LIMIT     = 0x1F;
+constexpr int DEFAULT_ARM_LIMIT = 0xFF;
 
-#define PISTON_INACTIVE		0x00
-#define PISTON_RETRACT		0x01
-#define PISTON_EXTEND		0x02
-#define MAX_FRAME			0x0F
-#define DEFAULT_LIMIT		0x1F
-#define DEFAULT_ARM_LIMIT	0xFF
-
-//#TPT-Directive ElementHeader Element_PSTN static int update(UPDATE_FUNC_ARGS)
-int Element_PSTN::update(UPDATE_FUNC_ARGS)
+static int update(UPDATE_FUNC_ARGS)
 {
  	if(parts[i].life)
  		return 0;
  	int maxSize = parts[i].tmp ? parts[i].tmp : DEFAULT_LIMIT;
  	int armLimit = parts[i].tmp2 ? parts[i].tmp2 : DEFAULT_ARM_LIMIT;
  	int state = 0;
-	int r, nxx, nyy, nxi, nyi, rx, ry;
 	int directionX = 0, directionY = 0;
-	if (state == PISTON_INACTIVE) {
-		for (rx=-2; rx<3; rx++)
-			for (ry=-2; ry<3; ry++)
-				if (BOUNDS_CHECK && (rx || ry) && (!rx || !ry))
+	if (state == PISTON_INACTIVE)
+	{
+		for (auto rx = -2; rx <= 2; rx++)
+		{
+			for (auto ry = -2; ry <= 2; ry++)
+			{
+				if ((rx || ry) && (!rx || !ry))
 				{
-					r = pmap[y+ry][x+rx];
+					auto r = pmap[y+ry][x+rx];
 					if (!r)
 						continue;
 					if (TYP(r)==PT_SPRK && parts[ID(r)].life==3) {
@@ -95,16 +100,21 @@ int Element_PSTN::update(UPDATE_FUNC_ARGS)
 							state = PISTON_RETRACT;
 					}
 				}
+			}
+		}
 	}
-	if(state == PISTON_EXTEND || state == PISTON_RETRACT) {
-		for (rx=-1; rx<2; rx++)
-			for (ry=-1; ry<2; ry++)
-				if (BOUNDS_CHECK && (rx || ry) && (!rx || !ry))
+	if (state == PISTON_EXTEND || state == PISTON_RETRACT)
+	{
+		for (auto rx = -1; rx <= 1; rx++)
+		{
+			for (auto ry = -1; ry <= 1; ry++)
+			{
+				if ((rx || ry) && (!rx || !ry))
 				{
-					r = pmap[y+ry][x+rx];
+					auto r = pmap[y+ry][x+rx];
 					if (!r)
 						continue;
-					if (TYP(r) == PT_PSTN)
+					if (TYP(r) == PT_PSTN && !parts[ID(r)].life)
 					{
 						bool movedPiston = false;
 						bool foundEnd = false;
@@ -114,7 +124,9 @@ int Element_PSTN::update(UPDATE_FUNC_ARGS)
 						int armCount = 0;
 						directionX = rx;
 						directionY = ry;
-						for (nxx = 0, nyy = 0, nxi = directionX, nyi = directionY; ; nyy += nyi, nxx += nxi) {
+						auto nxi = directionX, nyi = directionY;
+						for (auto nxx = 0, nyy = 0; ; nyy += nyi, nxx += nxi)
+						{
 							if (!(x+nxx<XRES && y+nyy<YRES && x+nxx >= 0 && y+nyy >= 0)) {
 								break;
 							}
@@ -132,14 +144,14 @@ int Element_PSTN::update(UPDATE_FUNC_ARGS)
 								}
 								else
 								{
-									pistonCount += floor((parts[ID(r)].temp-268.15)/10);// How many tens of degrees above 0 C, rounded to nearest ten degrees. Can be negative.
+									pistonCount += int(floor((parts[ID(r)].temp-268.15f)/10));// How many tens of degrees above 0 C, rounded to nearest ten degrees. Can be negative.
 								}
 							}
 							else if (nxx==0 && nyy==0)
 							{
 								// compatibility with BAD THINGS: starting PSTN layered underneath other particles
 								// (in v90, it started scanning from the neighbouring particle, so could not break out of loop at offset=(0,0))
-								pistonCount += floor((parts[i].temp-268.15)/10);
+								pistonCount += int(floor((parts[i].temp-268.15f)/10));
 								continue;
 							}
 							else
@@ -185,13 +197,13 @@ int Element_PSTN::update(UPDATE_FUNC_ARGS)
 							return 0;
 					}
 				}
-
+			}
+		}
 	}
 	return 0;
 }
 
-//#TPT-Directive ElementHeader Element_PSTN static StackData CanMoveStack(Simulation * sim, int stackX, int stackY, int directionX, int directionY, int maxSize, int amount, bool retract, int block)
-Element_PSTN::StackData Element_PSTN::CanMoveStack(Simulation * sim, int stackX, int stackY, int directionX, int directionY, int maxSize, int amount, bool retract, int block)
+static StackData CanMoveStack(Simulation * sim, int stackX, int stackY, int directionX, int directionY, int maxSize, int amount, bool retract, int block)
 {
 	int posX, posY, r, spaces = 0, currentPos = 0;
 	if (amount <= 0)
@@ -207,14 +219,14 @@ Element_PSTN::StackData Element_PSTN::CanMoveStack(Simulation * sim, int stackX,
 		if (!r)
 		{
 			spaces++;
-			tempParts[currentPos++] = -1;
+			sim->Element_PSTN_tempParts[currentPos++] = -1;
 			if (spaces >= amount)
 				break;
 		}
 		else
 		{
 			if (currentPos - spaces < maxSize && (!retract || (TYP(r) == PT_FRME && posX == stackX && posY == stackY)))
-				tempParts[currentPos++] = ID(r);
+				sim->Element_PSTN_tempParts[currentPos++] = ID(r);
 			else
 				return StackData(currentPos - spaces, spaces);
 		}
@@ -222,8 +234,7 @@ Element_PSTN::StackData Element_PSTN::CanMoveStack(Simulation * sim, int stackX,
 	return StackData(currentPos - spaces, spaces);
 }
 
-//#TPT-Directive ElementHeader Element_PSTN static int MoveStack(Simulation * sim, int stackX, int stackY, int directionX, int directionY, int maxSize, int amount, bool retract, int block, bool sticky, int callDepth = 0)
-int Element_PSTN::MoveStack(Simulation * sim, int stackX, int stackY, int directionX, int directionY, int maxSize, int amount, bool retract, int block, bool sticky, int callDepth)
+static int MoveStack(Simulation * sim, int stackX, int stackY, int directionX, int directionY, int maxSize, int amount, bool retract, int block, bool sticky, int callDepth)
 {
 	int posX, posY, r;
 	r = sim->pmap[stackY][stackX];
@@ -293,18 +304,18 @@ int Element_PSTN::MoveStack(Simulation * sim, int stackX, int stackY, int direct
 				break;
 			} else {
 				foundParts = true;
-				tempParts[currentPos++] = ID(r);
+				sim->Element_PSTN_tempParts[currentPos++] = ID(r);
 			}
 		}
 		if(foundParts) {
 			//Move particles
 			for(int j = 0; j < currentPos; j++) {
-				int jP = tempParts[j];
+				int jP = sim->Element_PSTN_tempParts[j];
 				int srcX = (int)(sim->parts[jP].x + 0.5f), srcY = (int)(sim->parts[jP].y + 0.5f);
 				int destX = srcX-directionX*amount, destY = srcY-directionY*amount;
 				sim->pmap[srcY][srcX] = 0;
-				sim->parts[jP].x = destX;
-				sim->parts[jP].y = destY;
+				sim->parts[jP].x = float(destX);
+				sim->parts[jP].y = float(destY);
 				sim->pmap[destY][destX] = PMAP(jP, sim->parts[jP].type);
 			}
 			return amount;
@@ -316,7 +327,7 @@ int Element_PSTN::MoveStack(Simulation * sim, int stackX, int stackY, int direct
 			//Move particles
 			int possibleMovement = 0;
 			for(int j = currentPos-1; j >= 0; j--) {
-				int jP = tempParts[j];
+				int jP = sim->Element_PSTN_tempParts[j];
 				if(jP < 0) {
 					possibleMovement++;
 					continue;
@@ -326,8 +337,8 @@ int Element_PSTN::MoveStack(Simulation * sim, int stackX, int stackY, int direct
 				int srcX = (int)(sim->parts[jP].x + 0.5f), srcY = (int)(sim->parts[jP].y + 0.5f);
 				int destX = srcX+directionX*possibleMovement, destY = srcY+directionY*possibleMovement;
 				sim->pmap[srcY][srcX] = 0;
-				sim->parts[jP].x = destX;
-				sim->parts[jP].y = destY;
+				sim->parts[jP].x = float(destX);
+				sim->parts[jP].y = float(destY);
 				sim->pmap[destY][destX] = PMAP(jP, sim->parts[jP].type);
 			}
 			return possibleMovement;
@@ -336,9 +347,7 @@ int Element_PSTN::MoveStack(Simulation * sim, int stackX, int stackY, int direct
 	return 0;
 }
 
-
-//#TPT-Directive ElementHeader Element_PSTN static int graphics(GRAPHICS_FUNC_ARGS)
-int Element_PSTN::graphics(GRAPHICS_FUNC_ARGS)
+static int graphics(GRAPHICS_FUNC_ARGS)
 {
 	if(cpart->life)
 	{
@@ -348,4 +357,11 @@ int Element_PSTN::graphics(GRAPHICS_FUNC_ARGS)
 	return 0;
 }
 
-Element_PSTN::~Element_PSTN() {}
+static bool ctypeDraw(CTYPEDRAW_FUNC_ARGS)
+{
+	if (t == PT_FRME)
+	{
+		return false;
+	}
+	return Element::basicCtypeDraw(CTYPEDRAW_FUNC_SUBCALL_ARGS);
+}

@@ -1,22 +1,18 @@
-#ifndef COPYTEXTBUTTON_H
-#define COPYTEXTBUTTON_H
-
+#pragma once
 #include "Button.h"
-#include "Label.h"
 
 namespace ui
 {
+	class Label;
 class CopyTextButton : public Button
 {
 	ui::Label *copyTextLabel;
 public:
-	CopyTextButton(Point position, Point size, std::string buttonText, Label *copyTextLabel_);
+	CopyTextButton(Point position, Point size, String buttonText, Label *copyTextLabel_);
 
-	virtual void OnMouseClick(int x, int y, unsigned int button);
+	void OnMouseClick(int x, int y, unsigned int button) override;
 
-	virtual void OnMouseEnter(int x, int y);
-	virtual void OnMouseLeave(int x, int y);
+	void OnMouseEnter(int x, int y) override;
+	void OnMouseLeave(int x, int y) override;
 };
 }
-#endif /* COPYTEXTBUTTON_H */
-
