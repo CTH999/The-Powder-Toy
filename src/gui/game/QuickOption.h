@@ -1,7 +1,5 @@
 #pragma once
-
 #include "common/String.h"
-
 #include <vector>
 
 class GameModel;

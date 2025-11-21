@@ -1,10 +1,13 @@
 #include "simulation/ElementCommon.h"
-//#TPT-Directive ElementClass Element_POLO PT_POLO 182
-Element_POLO::Element_POLO()
+
+static int update(UPDATE_FUNC_ARGS);
+static int graphics(GRAPHICS_FUNC_ARGS);
+
+void Element::Element_POLO()
 {
 	Identifier = "DEFAULT_PT_POLO";
 	Name = "POLO";
-	Colour = PIXPACK(0x506030);
+	Colour = 0x506030_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_NUCLEAR;
 	Enabled = 1;
@@ -27,7 +30,7 @@ Element_POLO::Element_POLO()
 
 	Weight = 90;
 
-	Temperature = 388.15f;
+	DefaultProperties.temp = 388.15f;
 	HeatConduct = 251;
 	Description = "Polonium, highly radioactive. Decays into NEUT and heats up.";
 
@@ -42,20 +45,19 @@ Element_POLO::Element_POLO()
 	HighTemperature = 526.95f;
 	HighTemperatureTransition = PT_LAVA;
 
-	Update = &Element_POLO::update;
-	Graphics = &Element_POLO::graphics;
+	Update = &update;
+	Graphics = &graphics;
 }
 
-#define COOLDOWN 15
-#define LIMIT 5
+constexpr int COOLDOWN = 15;
+constexpr int LIMIT = 5;
 
-//#TPT-Directive ElementHeader Element_POLO static int update(UPDATE_FUNC_ARGS)
-int Element_POLO::update(UPDATE_FUNC_ARGS)
+static int update(UPDATE_FUNC_ARGS)
 {
 	int r = sim->photons[y][x];
 	if (parts[i].tmp < LIMIT && !parts[i].life)
 	{
-		if (RNG::Ref().chance(1, 10000) && !parts[i].tmp)
+		if (sim->rng.chance(1, 10000) && !parts[i].tmp)
 		{
 			int s = sim->create_part(-3, x, y, PT_NEUT);
 			if (s >= 0)
@@ -68,7 +70,7 @@ int Element_POLO::update(UPDATE_FUNC_ARGS)
 			}
 		}
 
-		if (r && RNG::Ref().chance(1, 100))
+		if (r && sim->rng.chance(1, 100))
 		{
 			int s = sim->create_part(-3, x, y, PT_NEUT);
 			if (s >= 0)
@@ -103,8 +105,7 @@ int Element_POLO::update(UPDATE_FUNC_ARGS)
 	return 0;
 }
 
-//#TPT-Directive ElementHeader Element_POLO static int graphics(GRAPHICS_FUNC_ARGS)
-int Element_POLO::graphics(GRAPHICS_FUNC_ARGS)
+static int graphics(GRAPHICS_FUNC_ARGS)
 {
 	if (cpart->tmp >= LIMIT)
 	{
@@ -117,5 +118,3 @@ int Element_POLO::graphics(GRAPHICS_FUNC_ARGS)
 
 	return 0;
 }
-
-Element_POLO::~Element_POLO() {}

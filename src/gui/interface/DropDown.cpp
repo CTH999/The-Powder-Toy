@@ -7,29 +7,16 @@
 
 namespace ui {
 
-class ItemSelectedAction;
-class DropDownWindow: public ui::Window {
-	friend class ItemSelectedAction;
+class DropDownWindow : public ui::Window
+{
 	DropDown * dropDown;
 	Appearance appearance;
 	std::vector<Button> buttons;
-	bool isMouseInside;
+
 public:
-	class ItemSelectedAction: public ButtonAction
-	{
-		DropDownWindow * window;
-		String option;
-	public:
-		ItemSelectedAction(DropDownWindow * window, String option): window(window), option(option) { }
-		void ActionCallback(ui::Button *sender) override
-		{
-			window->CloseActiveWindow();
-			window->setOption(option);
-			window->SelfDestruct();
-		}
-	};
 	DropDownWindow(DropDown * dropDown):
-		Window(ui::Point(dropDown->Position.X+dropDown->GetParentWindow()->Position.X-5, dropDown->Position.Y+dropDown->GetParentWindow()->Position.Y-3), ui::Point(dropDown->Size.X+10, 1+dropDown->options.size()*16)),
+		Window(dropDown->GetScreenPos() + ui::Point(-1, -1 - (dropDown->optionIndex*16 < dropDown->GetScreenPos().Y ? dropDown->optionIndex*16 : 0)),
+						  ui::Point(dropDown->Size.X+2, 2+dropDown->options.size()*16)),
 		dropDown(dropDown),
 		appearance(dropDown->Appearance)
 	{
@@ -40,7 +27,12 @@ public:
 			tempButton->Appearance = appearance;
 			if (i)
 				tempButton->Appearance.Border = ui::Border(0, 1, 1, 1);
-			tempButton->SetActionCallback(new ItemSelectedAction(this, dropDown->options[i].first));
+			auto option = dropDown->options[i].first;
+			tempButton->SetActionCallback({ [this, option] {
+				CloseActiveWindow();
+				setOption(option);
+				SelfDestruct();
+			} });
 			AddComponent(tempButton);
 			currentY += 16;
 		}
@@ -48,20 +40,14 @@ public:
 	void OnDraw() override
 	{
 		Graphics * g = GetGraphics();
-		g->clearrect(Position.X, Position.Y, Size.X, Size.Y);
+		g->DrawFilledRect(RectSized(Position, Size), 0x000000_rgb);
 	}
 	void setOption(String option)
 	{
 		dropDown->SetOption(option);
-		if (dropDown->callback)
+		if (dropDown->actionCallback.change)
 		{
-			size_t optionIndex = 0;
-			for (optionIndex = 0; optionIndex < dropDown->options.size(); optionIndex++)
-			{
-				if(option == dropDown->options[optionIndex].first)
-					break;
-			}
-			dropDown->callback->OptionChanged(dropDown, dropDown->options[optionIndex]);
+			dropDown->actionCallback.change();
 		}
 	}
 	void OnTryExit(ExitMethod method) override
@@ -75,8 +61,7 @@ public:
 DropDown::DropDown(Point position, Point size):
 	Component(position, size),
 	isMouseInside(false),
-	optionIndex(-1),
-	callback(NULL)
+	optionIndex(-1)
 {
 }
 
@@ -114,10 +99,10 @@ void DropDown::Draw(const Point& screenPos)
 		backgroundColour = Appearance.BackgroundInactive;
 	}
 
-	g->fillrect(Position.X-1, Position.Y-1, Size.X+2, Size.Y+2, backgroundColour.Red, backgroundColour.Green, backgroundColour.Blue, backgroundColour.Alpha);
-	g->drawrect(Position.X, Position.Y, Size.X, Size.Y, borderColour.Red, borderColour.Green, borderColour.Blue, borderColour.Alpha);
+	g->BlendFilledRect(RectSized(Position - Vec2{ 1, 1 }, Size + Vec2{ 2, 2 }), backgroundColour);
+	g->BlendRect(RectSized(Position, Size), borderColour);
 	if(optionIndex!=-1)
-		g->drawtext(Position.X+textPosition.X, Position.Y+textPosition.Y, options[optionIndex].first, textColour.Red, textColour.Green, textColour.Blue, textColour.Alpha);
+		g->BlendText(Position + textPosition, options[optionIndex].first, textColour);
 }
 
 void DropDown::OnMouseEnter(int x, int y)
@@ -129,70 +114,55 @@ void DropDown::OnMouseLeave(int x, int y)
 {
 	isMouseInside = false;
 }
-	std::pair<String, int> DropDown::GetOption()
-	{
-		if(optionIndex!=-1)
-		{
-			return options[optionIndex];
-		}
-		return std::pair<String, int>("", -1);
-	}
 
-	void DropDown::SetOption(String option)
+std::pair<String, int> DropDown::GetOption()
+{
+	if(optionIndex!=-1)
 	{
-		for (size_t i = 0; i < options.size(); i++)
-		{
-			if (options[i].first == option)
-			{
-				optionIndex = i;
-				TextPosition(options[optionIndex].first);
-				return;
-			}
-		}
+		return options[optionIndex];
 	}
-	void DropDown::SetOption(int option)
-	{
-		for (size_t i = 0; i < options.size(); i++)
-		{
-			if (options[i].second == option)
-			{
-				optionIndex = i;
-				TextPosition(options[optionIndex].first);
-				return;
-			}
-		}
-	}
-	void DropDown::AddOption(std::pair<String, int> option)
-	{
-		for (size_t i = 0; i < options.size(); i++)
-		{
-			if (options[i] == option)
-				return;
-		}
-		options.push_back(option);
-	}
-	void DropDown::RemoveOption(String option)
-	{
-	start:
-		for (size_t i = 0; i < options.size(); i++)
-		{
-			if (options[i].first == option)
-			{
-				if ((int)i == optionIndex)
-					optionIndex = -1;
-				options.erase(options.begin()+i);
-				goto start;
-			}
-		}
-	}
-	void DropDown::SetOptions(std::vector<std::pair<String, int> > options)
-	{
-		this->options = options;
-	}
+	return std::pair<String, int>("", -1);
+}
 
+void DropDown::SetOption(String option)
+{
+	for (size_t i = 0; i < options.size(); i++)
+	{
+		if (options[i].first == option)
+		{
+			optionIndex = i;
+			TextPosition(options[optionIndex].first);
+			return;
+		}
+	}
+}
 
-DropDown::~DropDown() {
-	delete callback;
+void DropDown::SetOption(int option)
+{
+	for (size_t i = 0; i < options.size(); i++)
+	{
+		if (options[i].second == option)
+		{
+			optionIndex = i;
+			TextPosition(options[optionIndex].first);
+			return;
+		}
+	}
+}
+
+void DropDown::AddOption(std::pair<String, int> option)
+{
+	for (size_t i = 0; i < options.size(); i++)
+	{
+		if (options[i] == option)
+			return;
+	}
+	options.push_back(option);
+}
+
+void DropDown::SetOptions(std::vector<std::pair<String, int> > options)
+{
+	this->options = options;
 }
 
 } /* namespace ui */

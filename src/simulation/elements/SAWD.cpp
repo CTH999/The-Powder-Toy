@@ -1,10 +1,10 @@
 #include "simulation/ElementCommon.h"
-//#TPT-Directive ElementClass Element_SAWD PT_SAWD 181
-Element_SAWD::Element_SAWD()
+
+void Element::Element_SAWD()
 {
 	Identifier = "DEFAULT_PT_SAWD";
 	Name = "SAWD";
-	Colour = PIXPACK(0xF0F0A0);
+	Colour = 0xF0F0A0_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_POWDERS;
 	Enabled = 1;
@@ -22,11 +22,10 @@ Element_SAWD::Element_SAWD()
 	Flammable = 10;
 	Explosive = 0;
 	Meltable = 0;
-	Hardness = 30;
+       	Hardness = 29;
 
 	Weight = 18;
 
-	Temperature = R_TEMP+273.15f;
 	HeatConduct = 70;
 	Description = "Sawdust. Floats on water.";
 
@@ -41,8 +40,5 @@ Element_SAWD::Element_SAWD()
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
 
-	Update = NULL;
-	Graphics = NULL;
+	Graphics = nullptr; // is this needed?
 }
-
-Element_SAWD::~Element_SAWD() {}

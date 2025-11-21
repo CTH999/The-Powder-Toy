@@ -1,10 +1,12 @@
 #include "simulation/ElementCommon.h"
-//#TPT-Directive ElementClass Element_PTCT PT_PTCT 46
-Element_PTCT::Element_PTCT()
+
+static int update(UPDATE_FUNC_ARGS);
+
+void Element::Element_PTCT()
 {
 	Identifier = "DEFAULT_PT_PTCT";
 	Name = "PTCT";
-	Colour = PIXPACK(0x405050);
+	Colour = 0x405050_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_ELEC;
 	Enabled = 1;
@@ -26,9 +28,8 @@ Element_PTCT::Element_PTCT()
 
 	Weight = 100;
 
-	Temperature = R_TEMP+0.0f	+273.15f;
 	HeatConduct = 251;
-	Description = "Semi-conductor. Only conducts electricity when cold. (Less than 100C)";
+	Description = "PTC Thermistor. Conducts with PSCN and NSCN, but only when cooled below 100C.";
 
 	Properties = TYPE_SOLID|PROP_CONDUCTS|PROP_LIFE_DEC;
 
@@ -41,16 +42,12 @@ Element_PTCT::Element_PTCT()
 	HighTemperature = 1687.0f;
 	HighTemperatureTransition = PT_LAVA;
 
-	Update = &Element_PTCT::update;
+	Update = &update;
 }
 
-//#TPT-Directive ElementHeader Element_PTCT static int update(UPDATE_FUNC_ARGS)
-int Element_PTCT::update(UPDATE_FUNC_ARGS)
+static int update(UPDATE_FUNC_ARGS)
 {
 	if (parts[i].temp>295.0f)
 		parts[i].temp -= 2.5f;
 	return 0;
 }
-
-
-Element_PTCT::~Element_PTCT() {}

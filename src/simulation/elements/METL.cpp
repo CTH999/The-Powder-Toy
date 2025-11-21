@@ -1,10 +1,10 @@
 #include "simulation/ElementCommon.h"
-//#TPT-Directive ElementClass Element_METL PT_METL 14
-Element_METL::Element_METL()
+
+void Element::Element_METL()
 {
 	Identifier = "DEFAULT_PT_METL";
 	Name = "METL";
-	Colour = PIXPACK(0x404060);
+	Colour = 0x404060_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_ELEC;
 	Enabled = 1;
@@ -26,9 +26,8 @@ Element_METL::Element_METL()
 
 	Weight = 100;
 
-	Temperature = R_TEMP+0.0f	+273.15f;
 	HeatConduct = 251;
-	Description = "The basic conductor. Meltable.";
+	Description = "Metal, the basic conductor. Meltable.";
 
 	Properties = TYPE_SOLID|PROP_CONDUCTS|PROP_LIFE_DEC|PROP_HOT_GLOW;
 
@@ -40,8 +39,4 @@ Element_METL::Element_METL()
 	LowTemperatureTransition = NT;
 	HighTemperature = 1273.0f;
 	HighTemperatureTransition = PT_LAVA;
-
-	Update = NULL;
 }
-
-Element_METL::~Element_METL() {}

@@ -1,43 +1,42 @@
-#ifndef PREVIEWCONTROLLER_H_
-#define PREVIEWCONTROLLER_H_
-
+#pragma once
 #include "client/ClientListener.h"
+#include "gui/SavePreviewType.h"
+#include <functional>
+#include <memory>
 
+class VideoBuffer;
 class SaveInfo;
-class ControllerCallback;
 class LoginController;
 class PreviewModel;
 class PreviewView;
 class PreviewController: public ClientListener {
 	int saveId;
-	int saveDate;
 	PreviewModel * previewModel;
 	PreviewView * previewView;
 	LoginController * loginWindow;
-	ControllerCallback * callback;
+	std::function<void ()> onDone;
 public:
 	void NotifyAuthUserChanged(Client * sender) override;
 	inline int SaveID() { return saveId; }
 
 	bool HasExited;
-	PreviewController(int saveID, bool instant, ControllerCallback * callback);
-	PreviewController(int saveID, int saveDate, bool instant, ControllerCallback * callback);
+	PreviewController(int saveID, int saveDate, SavePreviewType savePreviewType, std::function<void ()> onDone, std::unique_ptr<VideoBuffer> thumbnail);
 	void Exit();
 	void DoOpen();
 	void OpenInBrowser();
-	void Report(String message);
 	void ShowLogin();
 	bool GetDoOpen();
-	SaveInfo * GetSaveInfo();
+	bool GetFromUrl();
+	const SaveInfo *GetSaveInfo() const;
+	std::unique_ptr<SaveInfo> TakeSaveInfo();
 	PreviewView * GetView() { return previewView; }
 	void Update();
 	void FavouriteSave();
-	bool SubmitComment(String comment);
 
 	bool NextCommentPage();
 	bool PrevCommentPage();
+	void RefreshComments();
+	void CommentAdded();
 
 	virtual ~PreviewController();
 };
-
-#endif /* PREVIEWCONTROLLER_H_ */

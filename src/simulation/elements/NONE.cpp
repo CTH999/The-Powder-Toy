@@ -1,10 +1,13 @@
 #include "simulation/ElementCommon.h"
-//#TPT-Directive ElementClass Element_NONE PT_NONE 0
-Element_NONE::Element_NONE()
+#include "graphics/VideoBuffer.h"
+
+static std::unique_ptr<VideoBuffer> iconGen(int wallID, Vec2<int> size);
+
+void Element::Element_NONE()
 {
 	Identifier = "DEFAULT_PT_NONE";
-	Name = "";
-	Colour = PIXPACK(0x000000);
+	Name = "NONE";
+	Colour = 0x000000_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_SPECIAL;
 	Enabled = 1;
@@ -26,7 +29,6 @@ Element_NONE::Element_NONE()
 
 	Weight = 100;
 
-	Temperature = R_TEMP+273.15f;
 	HeatConduct = 0;
 	Description = "Erases particles.";
 
@@ -41,25 +43,12 @@ Element_NONE::Element_NONE()
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
 
-	Update = NULL;
-	IconGenerator = &Element_NONE::iconGen;
+	IconGenerator = &iconGen;
 }
 
-//#TPT-Directive ElementHeader Element_NONE static VideoBuffer * iconGen(int, int, int)
-VideoBuffer * Element_NONE::iconGen(int wallID, int width, int height)
+static std::unique_ptr<VideoBuffer> iconGen(int wallID, Vec2<int> size)
 {
-	VideoBuffer * newTexture = new VideoBuffer(width, height);
-
-	for (int j=3; j<(width-4)/2; j++)
-	{
-		newTexture->SetPixel(j+6, j, 0xFF, 0, 0, 255);
-		newTexture->SetPixel(j+7, j, 0xFF, 0, 0, 255);
-		newTexture->SetPixel(-j+19, j, 0xFF, 0, 0, 255);
-		newTexture->SetPixel(-j+20, j, 0xFF, 0, 0, 255);
-	}
-
-	return newTexture;
+	auto texture = std::make_unique<VideoBuffer>(size);
+	texture->BlendChar(size / 2 - Vec2(4, 2), 0xE06C, 0xFF0000_rgb .WithAlpha(0xFF));
+	return texture;
 }
-
-
-Element_NONE::~Element_NONE() {}
