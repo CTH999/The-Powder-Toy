@@ -1,10 +1,10 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_WAX PT_WAX 33
-Element_WAX::Element_WAX()
+#include "simulation/ElementCommon.h"
+
+void Element::Element_WAX()
 {
 	Identifier = "DEFAULT_PT_WAX";
 	Name = "WAX";
-	Colour = PIXPACK(0xF0F0BB);
+	Colour = 0xF0F0BB_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_SOLIDS;
 	Enabled = 1;
@@ -26,9 +26,8 @@ Element_WAX::Element_WAX()
 
 	Weight = 100;
 
-	Temperature = R_TEMP+0.0f	+273.15f;
 	HeatConduct = 44;
-	Description = "Wax. Melts at moderately high temperatures.";
+	Description = "Flammable, melts at moderately high temperatures.";
 
 	Properties = TYPE_SOLID;
 
@@ -40,8 +39,4 @@ Element_WAX::Element_WAX()
 	LowTemperatureTransition = NT;
 	HighTemperature = 319.0f;
 	HighTemperatureTransition = PT_MWAX;
-
-	Update = NULL;
 }
-
-Element_WAX::~Element_WAX() {}

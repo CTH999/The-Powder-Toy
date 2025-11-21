@@ -1,7 +1,5 @@
 #pragma once
-
-#include <string>
-#include "common/tpt-compat.h"
+#include "common/String.h"
 #include "Appearance.h"
 #include "Point.h"
 
@@ -29,10 +27,9 @@ namespace ui
 		ui::Point iconPosition;
 		ui::ContextMenu * menu;
 		Graphics * GetGraphics();
+
 	public:
-		Component(Window* parent_state);
 		Component(Point position, Point size);
-		Component();
 		virtual ~Component();
 
 		void* UserData;
@@ -45,14 +42,18 @@ namespace ui
 		Point Size;
 		bool Enabled;
 		bool Visible;
+		bool DoesTextInput;
+		bool MouseInside;
+		bool MouseDownInside;
 
 		ui::Appearance Appearance;
 		//virtual void SetAppearance(ui::Appearance);
 		//ui::Appearance GetAppearance();
-		virtual void TextPosition(std::string);
+		virtual void TextPosition(String);
 
 		void Refresh();
 
+		Point GetContainerPos();
 		Point GetScreenPos();
 
 		/* See the parent of this component.
@@ -66,32 +67,10 @@ namespace ui
 
 		virtual void OnContextMenuAction(int item);
 
-		//UI functions:
-		/*
-			void Tick(float dt);
-			void Draw(const Point& screenPos);
-
-			void OnMouseHover(int localx, int localy);
-			void OnMouseMoved(int localx, int localy, int dx, int dy);
-			void OnMouseMovedInside(int localx, int localy, int dx, int dy);
-			void OnMouseEnter(int localx, int localy);
-			void OnMouseLeave(int localx, int localy);
-			void OnMouseDown(int x, int y, unsigned int button);
-			void OnMouseUp(int x, int y, unsigned int button);
-			void OnMouseClick(int localx, int localy, unsigned int button);
-			void OnMouseUnclick(int localx, int localy, unsigned int button);
-			void OnMouseWheel(int localx, int localy, int d);
-			void OnMouseWheelInside(int localx, int localy, int d);
-			void OnKeyPress(int key, Uint16 character, bool shift, bool ctrl, bool alt);
-			void OnKeyRelease(int key, Uint16 character, bool shift, bool ctrl, bool alt);
-		*/
-
 		///
 		// Called: Every tick.
-		// Params:
-		//	dt: The change in time.
 		///
-		virtual void Tick(float dt);
+		virtual void Tick();
 
 		///
 		// Called: When ready to draw.
@@ -116,20 +95,8 @@ namespace ui
 		// Params:
 		//	localx: Local mouse X position.
 		//	localy: Local mouse Y position.
-		// 	dx: Mouse X delta.
-		// 	dy: Mouse Y delta.
 		///
-		virtual void OnMouseMoved(int localx, int localy, int dx, int dy);
-
-		///
-		// Called: When the mouse moves.
-		// Params:
-		//	localx: Local mouse X position.
-		//	localy: Local mouse Y position.
-		// 	dx: Mouse X delta.
-		// 	dy: Mouse Y delta.
-		///
-		virtual void OnMouseMovedInside(int localx, int localy, int dx, int dy);
+		virtual void OnMouseMoved(int localx, int localy);
 
 		///
 		// Called: When the mouse moves on top of the item.
@@ -168,7 +135,7 @@ namespace ui
 		virtual void OnMouseUp(int x, int y, unsigned button);
 
 		///
-		// Called: When a mouse button is pressed on top of the item.
+		// Called: When a mouse button is pressed and then released on top of the item.
 		// Params:
 		// 	x: X position of the mouse.
 		// 	y: Y position of the mouse.
@@ -177,20 +144,11 @@ namespace ui
 		virtual void OnMouseClick(int localx, int localy, unsigned button);
 
 		///
-		// Called: When a mouse button is released on top of the item.
-		// Params:
-		// 	x: X position of the mouse.
-		// 	y: Y position of the mouse.
-		// 	button: The button that is being released.
-		///
-		virtual void OnMouseUnclick(int localx, int localy, unsigned button);
-
-		///
 		// Called: When the mouse wheel moves/changes.
 		// Params:
 		//	localx: Local mouse X position.
 		//	localy: Local mouse Y position.
-		// 	d: The mouse wheel movement value.
+		// 	d: The vertical scroll offset
 		///
 		virtual void OnMouseWheel(int localx, int localy, int d);
 
@@ -199,7 +157,7 @@ namespace ui
 		// Params:
 		//	localx: Local mouse X position.
 		//	localy: Local mouse Y position.
-		// 	d: The mouse wheel movement value.
+		// 	d: The vertical scroll offset
 		///
 		virtual void OnMouseWheelInside(int localx, int localy, int d);
 
@@ -211,7 +169,7 @@ namespace ui
 		// 	ctrl: Control key is down.
 		// 	alt: Alternate key is down.
 		///
-		virtual void OnKeyPress(int key, Uint16 character, bool shift, bool ctrl, bool alt);
+		virtual void OnKeyPress(int key, int scan, bool repeat, bool shift, bool ctrl, bool alt);
 
 		///
 		// Called: When a key is released.
@@ -221,6 +179,12 @@ namespace ui
 		// 	ctrl: Control key is released.
 		// 	alt: Alternate key is released.
 		///
-		virtual void OnKeyRelease(int key, Uint16 character, bool shift, bool ctrl, bool alt);
+		virtual void OnKeyRelease(int key, int scan, bool repeat, bool shift, bool ctrl, bool alt);
+
+		virtual void OnTextInput(String text);
+		virtual void OnTextEditing(String text);
+
+		virtual void OnFocus();
+		virtual void OnDefocus();
 	};
 }

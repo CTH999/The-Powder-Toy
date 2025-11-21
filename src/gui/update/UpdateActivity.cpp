@@ -1,57 +1,74 @@
-#include <bzlib.h>
-#include <sstream>
+#include "UpdateActivity.h"
+#include "client/http/Request.h"
+#include "prefs/GlobalPrefs.h"
+#include "common/platform/Platform.h"
+#include "tasks/Task.h"
+#include "tasks/TaskWindow.h"
 #include "gui/dialogues/ConfirmPrompt.h"
 #include "gui/interface/Engine.h"
-#include "UpdateActivity.h"
-#include "tasks/Task.h"
-#include "client/HTTP.h"
-#include "client/Client.h"
-#include "Update.h"
-#include "Platform.h"
-
+#include "Config.h"
+#include <bzlib.h>
+#include <memory>
 
 class UpdateDownloadTask : public Task
 {
 public:
-	UpdateDownloadTask(std::string updateName, UpdateActivity * a) : a(a), updateName(updateName) {}
+	UpdateDownloadTask(ByteString updateName, UpdateActivity * a) : a(a), updateName(updateName) {}
 private:
 	UpdateActivity * a;
-	std::string updateName;
-	virtual void notifyDoneMain(){
+	ByteString updateName;
+	void notifyDoneMain() override {
 		a->NotifyDone(this);
 	}
-	virtual void notifyErrorMain()
+	void notifyErrorMain() override
 	{
 		a->NotifyError(this);
 	}
-	virtual bool doWork()
+	bool doWork() override
 	{
-		std::stringstream errorStream;
-		void * request = http_async_req_start(NULL, (char*)updateName.c_str(), NULL, 0, 0);
+		auto &prefs = GlobalPrefs::Ref();
+
+		auto niceNotifyError = [this](String error) {
+			notifyError("Downloaded update is corrupted\n" + error);
+			return false;
+		};
+
+		auto request = std::make_unique<http::Request>(updateName);
+		request->Start();
 		notifyStatus("Downloading update");
 		notifyProgress(-1);
-		while(!http_async_req_status(request))
+		while(!request->CheckDone())
 		{
-			int total, done;
-			http_async_get_length(request, &total, &done);
-			notifyProgress((float(done)/float(total))*100.0f);
+			int64_t total, done;
+			std::tie(total, done) = request->CheckProgress();
+			if (total == -1)
+			{
+				notifyProgress(-1);
+			}
+			else
+			{
+				notifyProgress(total ? done * 100 / total : 0);
+			}
+			Platform::Millisleep(1);
 		}
 
-		char * data;
-		int dataLength, status;
-		data = http_async_req_stop(request, &status, &dataLength);
+		int status;
+		ByteString data;
+		try
+		{
+			std::tie(status, data) = request->Finish();
+		}
+		catch (const http::RequestError &ex)
+		{
+			return niceNotifyError("Could not download update: " + String::Build("Server responded with Status ", ByteString(ex.what()).FromAscii()));
+		}
 		if (status!=200)
 		{
-			free(data);
-			errorStream << "Server responded with Status " << status;
-			notifyError("Could not download update: " + errorStream.str());
-			return false;
+			return niceNotifyError("Could not download update: " + String::Build("Server responded with Status ", status));
 		}
-		if (!data)
+		if (!data.size())
 		{
-			errorStream << "Server responded with nothing";
-			notifyError("Server did not return any data");
-			return false;
+			return niceNotifyError("Server did not return any data");
 		}
 
 		notifyStatus("Unpacking update");
@@ -59,15 +76,13 @@ private:
 
 		unsigned int uncompressedLength;
 
-		if(dataLength<16)
+		if(data.size()<16)
 		{
-			errorStream << "Unsufficient data, got " << dataLength << " bytes";
-			goto corrupt;
+			return niceNotifyError(String::Build("Unsufficient data, got ", data.size(), " bytes"));
 		}
 		if (data[0]!=0x42 || data[1]!=0x75 || data[2]!=0x54 || data[3]!=0x54)
 		{
-			errorStream << "Invalid update format";
-			goto corrupt;
+			return niceNotifyError("Invalid update format");
 		}
 
 		uncompressedLength  = (unsigned char)data[4];
@@ -75,55 +90,34 @@ private:
 		uncompressedLength |= ((unsigned char)data[6])<<16;
 		uncompressedLength |= ((unsigned char)data[7])<<24;
 
-		char * res;
-		res = (char *)malloc(uncompressedLength);
-		if (!res)
-		{
-			errorStream << "Unable to allocate " << uncompressedLength << " bytes of memory for decompression";
-			goto corrupt;
-		}
+		std::vector<char> res(uncompressedLength);
 
 		int dstate;
-		dstate = BZ2_bzBuffToBuffDecompress((char *)res, (unsigned *)&uncompressedLength, (char *)(data+8), dataLength-8, 0, 0);
+		dstate = BZ2_bzBuffToBuffDecompress(res.data(), (unsigned *)&uncompressedLength, &data[8], data.size()-8, 0, 0);
 		if (dstate)
 		{
-			errorStream << "Unable to decompress update: " << dstate;
-			free(res);
-			goto corrupt;
+			return niceNotifyError(String::Build("Unable to decompress update: ", dstate));
 		}
-
-		free(data);
 
 		notifyStatus("Applying update");
 		notifyProgress(-1);
 
-		Client::Ref().SetPref("version.update", true);
-		Client::Ref().WritePrefs();
-		if (update_start(res, uncompressedLength))
+		prefs.Set("version.update", true);
+		if (!Platform::UpdateStart(res))
 		{
-			Client::Ref().SetPref("version.update", false);
-			update_cleanup();
+			prefs.Set("version.update", false);
+			Platform::UpdateCleanup();
 			notifyError("Update failed - try downloading a new version.");
 			return false;
 		}
 
 		return true;
-
-	corrupt:
-		notifyError("Downloaded update is corrupted\n" + errorStream.str());
-		free(data);
-		return false;
 	}
 };
 
-UpdateActivity::UpdateActivity() {
-	std::stringstream file;
-#ifdef UPDATESERVER
-	file << "http://" << UPDATESERVER << Client::Ref().GetUpdateInfo().File;
-#else
-	file << "http://" << SERVER << Client::Ref().GetUpdateInfo().File;
-#endif
-	updateDownloadTask = new UpdateDownloadTask(file.str(), this);
+UpdateActivity::UpdateActivity(UpdateInfo info)
+{
+	updateDownloadTask = new UpdateDownloadTask(info.file, this);
 	updateWindow = new TaskWindow("Downloading update...", updateDownloadTask, true);
 }
 
@@ -144,30 +138,25 @@ void UpdateActivity::Exit()
 
 void UpdateActivity::NotifyError(Task * sender)
 {
-	class ErrorMessageCallback: public ConfirmDialogueCallback
+	StringBuilder sb;
+	if constexpr (USE_UPDATESERVER)
 	{
-		UpdateActivity * a;
-	public:
-		ErrorMessageCallback(UpdateActivity * a_) {	a = a_;	}
-		virtual void ConfirmCallback(ConfirmPrompt::DialogueResult result) {
-			if (result == ConfirmPrompt::ResultOkay)
-			{
-#ifndef UPDATESERVER
-				Platform::OpenURI("http://powdertoy.co.uk/Download.html");
-#endif
-			}
-			a->Exit();
+		sb << "Please go online to manually download a newer version.\n";
+	}
+	else
+	{
+		sb << "Please visit the website to download a newer version.\n";
+	}
+	sb << "Error: " << sender->GetError();
+	new ConfirmPrompt("Autoupdate failed", sb.Build(), { [this] {
+		if constexpr (!USE_UPDATESERVER)
+		{
+			Platform::OpenURI(ByteString::Build(SERVER, "/Download.html"));
 		}
-		virtual ~ErrorMessageCallback() { }
-	};
-#ifdef UPDATESERVER
-	new ConfirmPrompt("Autoupdate failed", "Please go online to manually download a newer version.\nError: " + sender->GetError(), new ErrorMessageCallback(this));
-#else
-	new ConfirmPrompt("Autoupdate failed", "Please visit the website to download a newer version.\nError: " + sender->GetError(), new ErrorMessageCallback(this));
-#endif
+		Exit();
+	}, [this] { Exit(); } });
 }
 
 
 UpdateActivity::~UpdateActivity() {
 }
-

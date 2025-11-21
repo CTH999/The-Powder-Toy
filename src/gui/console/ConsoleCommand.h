@@ -1,23 +1,21 @@
-#ifndef CONSOLECOMMAND_H_
-#define CONSOLECOMMAND_H_
+#pragma once
+#include "common/String.h"
 
 class ConsoleCommand
 {
 public:
-	ConsoleCommand(std::string command, int returnStatus, std::string returnValue):
+	ConsoleCommand(String command, int returnStatus, String returnValue):
 		Command(command), ReturnStatus(returnStatus), ReturnValue(returnValue)
 	{
 
 	}
-	std::string Command;
+	String Command;
 	int ReturnStatus;
-	std::string ReturnValue;
+	String ReturnValue;
 
-	operator std::string() const
+	operator String() const
 	{
 		return Command;
 	}
 };
 
-
-#endif /* CONSOLECOMMAND_H_ */

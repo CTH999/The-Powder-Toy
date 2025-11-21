@@ -1,10 +1,11 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_RFGL PT_RFGL 184
-Element_RFGL::Element_RFGL()
+#include "simulation/ElementCommon.h"
+#include "RFRG.h"
+
+void Element::Element_RFGL()
 {
 	Identifier = "DEFAULT_PT_RFGL";
 	Name = "RFGL";
-	Colour = PIXPACK(0x84C2CF);
+	Colour = 0x84C2CF_rgb;
 	MenuVisible = 0;
 	MenuSection = SC_LIQUID;
 	Enabled = 1;
@@ -22,11 +23,10 @@ Element_RFGL::Element_RFGL()
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 0;
-	Hardness = 20;
+	Hardness = 21;
 
 	Weight = 10;
 
-	Temperature = R_TEMP + 273.15f;
 	HeatConduct = 3;
 	Description = "Liquid refrigerant.";
 
@@ -41,7 +41,5 @@ Element_RFGL::Element_RFGL()
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
 
-	Update = &Element_RFRG::update;
+	Update = &Element_RFRG_update;
 }
-
-Element_RFGL::~Element_RFGL() {}

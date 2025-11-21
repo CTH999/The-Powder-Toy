@@ -1,39 +1,43 @@
-#ifndef TEXTBOX_H
-#define TEXTBOX_H
-
-#include <string>
-
+#pragma once
 #include "Label.h"
-#include "PowderToy.h"
+
+#include <functional>
 
 namespace ui
 {
-class Textbox;
-class TextboxAction
+struct TextboxAction
 {
-public:
-	virtual void TextChangedCallback(ui::Textbox * sender) {}
-	virtual ~TextboxAction() {}
+	std::function<void ()> change;
+};
+
+struct TextboxDefocusAction
+{
+	std::function<void ()> callback;
 };
 
 class Textbox : public Label
 {
-	friend class TextboxAction;
+	void AfterTextChange(bool changed);
+	void InsertText(String text);
+	void StartTextEditing();
+	void StopTextEditing();
+
 public:
 	bool ReadOnly;
 	enum ValidInput { All, Multiline, Numeric, Number }; // Numeric doesn't delete trailing 0's
-	Textbox(Point position, Point size, std::string textboxText = "", std::string textboxPlaceholder = "");
-	virtual ~Textbox();
+	Textbox(Point position, Point size, String textboxText = String(), String textboxPlaceholder = String());
+	virtual ~Textbox() = default;
 
-	virtual void SetText(std::string text);
-	virtual std::string GetText();
+	void SetText(String text) override;
+	String GetText() override;
 
-	virtual void SetPlaceholder(std::string text);
+	virtual void SetPlaceholder(String text);
 
 	void SetBorder(bool border) { this->border = border; }
 	void SetHidden(bool hidden);
 	bool GetHidden() { return masked; }
-	void SetActionCallback(TextboxAction * action) { actionCallback = action; }
+	void SetActionCallback(TextboxAction action) { actionCallback = action; }
+	void SetDefocusCallback(TextboxDefocusAction action) { defocusCallback = action; }
 
 	void SetLimit(size_t limit);
 	size_t GetLimit();
@@ -44,30 +48,50 @@ public:
 	void resetCursorPosition();
 	void TabFocus();
 	//Determines if the given character is valid given the input type
-	bool CharacterValid(Uint16 character);
+	bool CharacterValid(int character);
+	bool StringValid(String text);
 
-	virtual void Tick(float dt);
-	virtual void OnContextMenuAction(int item);
-	virtual void OnMouseClick(int x, int y, unsigned button);
-	virtual void OnMouseUp(int x, int y, unsigned button);
-	virtual void OnMouseMoved(int localx, int localy, int dx, int dy);
-	virtual void OnKeyPress(int key, Uint16 character, bool shift, bool ctrl, bool alt);
-	virtual void OnVKeyPress(int key, Uint16 character, bool shift, bool ctrl, bool alt);
-	virtual void OnKeyRelease(int key, Uint16 character, bool shift, bool ctrl, bool alt);
-	virtual void Draw(const Point& screenPos);
+	void Tick() override;
+	void OnContextMenuAction(int item) override;
+	void OnMouseDown(int x, int y, unsigned button) override;
+	void OnMouseUp(int x, int y, unsigned button) override;
+	void OnMouseMoved(int localx, int localy) override;
+	void OnKeyPress(int key, int scan, bool repeat, bool shift, bool ctrl, bool alt) override;
+	void OnVKeyPress(int key, int scan, bool repeat, bool shift, bool ctrl, bool alt);
+	void OnKeyRelease(int key, int scan, bool repeat, bool shift, bool ctrl, bool alt) override;
+	void OnTextInput(String text) override;
+	void OnTextEditing(String text) override;
+	void OnDefocus() override;
+	void Draw(const Point& screenPos) override;
 
 protected:
 	ValidInput inputType;
 	size_t limit;
 	unsigned long repeatTime;
 	int keyDown;
-	Uint16 characterDown;
+	unsigned short characterDown;
 	bool mouseDown;
 	bool masked, border;
 	int cursor, cursorPositionX, cursorPositionY;
-	TextboxAction *actionCallback;
-	std::string backingText;
-	std::string placeHolder;
+	TextboxAction actionCallback;
+	TextboxDefocusAction defocusCallback;
+	String backingText;
+	String placeHolder;
+
+	// * Cursor state to reset to before inserting actual input in StopTextEditing.
+	int selectionIndexLSave1;
+	int selectionIndexHSave1;
+	String backingTextSave1;
+	int cursorSave1;
+
+	// * Cursor state to reset to before inserting a candidate string in OnTextEditing.
+	int selectionIndexLSave2;
+	int selectionIndexHSave2;
+	String backingTextSave2;
+	int cursorSave2;
+
+	Point inputRectPosition;
+	bool textEditing;
 
 	virtual void cutSelection();
 	virtual void pasteIntoSelection();
@@ -75,5 +99,3 @@ protected:
 
 }
 
-
-#endif // TEXTBOX_H

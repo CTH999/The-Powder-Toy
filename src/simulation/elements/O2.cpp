@@ -1,10 +1,12 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_O2 PT_O2 61
-Element_O2::Element_O2()
+#include "simulation/ElementCommon.h"
+
+static int update(UPDATE_FUNC_ARGS);
+
+void Element::Element_O2()
 {
 	Identifier = "DEFAULT_PT_O2";
 	Name = "OXYG";
-	Colour = PIXPACK(0x80A0FF);
+	Colour = 0x80A0FF_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_GAS;
 	Enabled = 1;
@@ -26,7 +28,6 @@ Element_O2::Element_O2()
 
 	Weight = 1;
 
-	Temperature = R_TEMP+0.0f	+273.15f;
 	HeatConduct = 70;
 	Description = "Oxygen gas. Ignites easily.";
 
@@ -41,47 +42,50 @@ Element_O2::Element_O2()
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
 
-	Update = &Element_O2::update;
+	Update = &update;
 }
 
-//#TPT-Directive ElementHeader Element_O2 static int update(UPDATE_FUNC_ARGS)
-int Element_O2::update(UPDATE_FUNC_ARGS)
+static int update(UPDATE_FUNC_ARGS)
 {
-	int r,rx,ry;
-	for (rx=-2; rx<3; rx++)
-		for (ry=-2; ry<3; ry++)
-			if (BOUNDS_CHECK && (rx || ry))
+	auto &sd = SimulationData::CRef();
+	auto &can_move = sd.can_move;
+	for (auto rx = -2; rx <= 2; rx++)
+	{
+		for (auto ry = -2; ry <= 2; ry++)
+		{
+			if (rx || ry)
 			{
-				r = pmap[y+ry][x+rx];
+				auto r = pmap[y+ry][x+rx];
 				if (!r)
 					continue;
 
 				if (TYP(r)==PT_FIRE)
 				{
-					parts[ID(r)].temp+=(rand()%100);
-					if(parts[ID(r)].tmp&0x01)
-						parts[ID(r)].temp=3473;
+					parts[ID(r)].temp += sim->rng.between(0, 99);
+					if (parts[ID(r)].tmp & 0x01)
+						parts[ID(r)].temp = 3473;
 					parts[ID(r)].tmp |= 2;
 
 					sim->create_part(i,x,y,PT_FIRE);
-					parts[i].temp+=(rand()%100);
+					parts[i].temp += sim->rng.between(0, 99);
 					parts[i].tmp |= 2;
 				}
 				else if (TYP(r)==PT_PLSM && !(parts[ID(r)].tmp&4))
 				{
 					sim->create_part(i,x,y,PT_FIRE);
-					parts[i].temp+=(rand()%100);
+					parts[i].temp += sim->rng.between(0, 99);
 					parts[i].tmp |= 2;
 				}
 			}
+		}
+	}
 	if (parts[i].temp > 9973.15 && sim->pv[y/CELL][x/CELL] > 250.0f)
 	{
-		int gravPos = ((y/CELL)*(XRES/CELL))+(x/CELL);
-		float gravx = sim->gravx[gravPos];
-		float gravy = sim->gravy[gravPos];
+		auto gravx = sim->gravOut.forceX[Vec2{ x, y } / CELL];
+		auto gravy = sim->gravOut.forceY[Vec2{ x, y } / CELL];
 		if (gravx*gravx + gravy*gravy > 400)
 		{
-			if (!(rand()%5))
+			if (sim->rng.chance(1, 5))
 			{
 				int j;
 				sim->create_part(i,x,y,PT_BRMT);
@@ -95,8 +99,8 @@ int Element_O2::update(UPDATE_FUNC_ARGS)
 					parts[j].temp = MAX_TEMP;
 					parts[j].tmp = 0x1;
 				}
-				rx = x+rand()%3-1, ry = y+rand()%3-1, r = TYP(pmap[ry][rx]);
-				if (sim->can_move[PT_PLSM][r] || r == PT_O2)
+				auto rx = x + sim->rng.between(-1, 1), ry = y + sim->rng.between(-1, 1), r = TYP(pmap[ry][rx]);
+				if (can_move[PT_PLSM][r] || r == PT_O2)
 				{
 					j = sim->create_part(-3,rx,ry,PT_PLSM);
 					if (j > -1)
@@ -109,12 +113,9 @@ int Element_O2::update(UPDATE_FUNC_ARGS)
 				if (j != -1)
 					parts[j].temp = MAX_TEMP;
 				parts[i].temp = MAX_TEMP;
-				sim->pv[y/CELL][x/CELL] = 256;
+				sim->pv[y/CELL][x/CELL] = MAX_PRESSURE;
 			}
 		}
 	}
 	return 0;
 }
-
-
-Element_O2::~Element_O2() {}
