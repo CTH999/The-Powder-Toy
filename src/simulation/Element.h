@@ -1,13 +1,15 @@
 #pragma once
-#include <memory>
 #include "common/Vec2.h"
 #include "graphics/Pixel.h"
 #include "ElementDefs.h"
 #include "Particle.h"
 #include "StructProperty.h"
+#include "ElementNumbers.h"
+#include <memory>
 
 class Simulation;
 class Renderer;
+struct GraphicsFuncContext;
 class VideoBuffer;
 struct Particle;
 class Element
@@ -15,7 +17,7 @@ class Element
 public:
 	ByteString Identifier;
 	String Name;
-	pixel Colour;
+	RGB Colour;
 	int MenuVisible;
 	int MenuSection;
 	int Enabled;
@@ -38,6 +40,7 @@ public:
 	unsigned int PhotonReflectWavelengths;
 	int Weight;
 	unsigned char HeatConduct;
+	float HeatCapacity; // Volumetric heat capacity per one pixel. Must be nonzero. The default value is 1.0f.
 	String Description;
 	unsigned int Properties;
 	unsigned int CarriesTypeIn;
@@ -75,7 +78,7 @@ public:
 	 by higher-level processes referring to them by name such as Lua or the property tool **/
 	static std::vector<StructProperty> const &GetProperties();
 
-#define ELEMENT_NUMBERS_DECLARE
-#include "ElementNumbers.h"
+#define ELEMENT_NUMBERS_DECLARE(name, id) void Element_ ## name ();
+	ELEMENT_NUMBERS(ELEMENT_NUMBERS_DECLARE)
 #undef ELEMENT_NUMBERS_DECLARE
 };

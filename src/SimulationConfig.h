@@ -31,7 +31,7 @@ constexpr int MAXSIGNS = 16;
 
 constexpr int   ISTP            = CELL / 2;
 constexpr float CFDS            = 4.0f / CELL;
-constexpr float SIM_MAXVELOCITY = 1e4f;
+constexpr float MAX_VELOCITY = 1e4f;
 
 //Air constants
 constexpr float AIR_TSTEPP = 0.3f;
@@ -42,10 +42,13 @@ constexpr float AIR_PLOSS  = 0.9999f;
 
 constexpr int NGOL = 24;
 
-constexpr int CIRCLE_BRUSH = 0;
-constexpr int SQUARE_BRUSH = 1;
-constexpr int TRI_BRUSH    = 2;
-constexpr int BRUSH_NUM    = 3;
+enum DefaultBrushes
+{
+	BRUSH_CIRCLE,
+	BRUSH_SQUARE,
+	BRUSH_TRIANGLE,
+	NUM_DEFAULTBRUSHES,
+};
 
 //Photon constants
 constexpr int SURF_RANGE     = 10;

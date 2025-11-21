@@ -12,7 +12,7 @@ namespace Platform
 ByteString GetCwd()
 {
 	ByteString cwd;
-	char *cwdPtr = getcwd(NULL, 0);
+	char *cwdPtr = getcwd(nullptr, 0);
 	if (cwdPtr)
 	{
 		cwd = cwdPtr;
@@ -26,7 +26,7 @@ void Millisleep(long int t)
 	struct timespec s;
 	s.tv_sec = t / 1000;
 	s.tv_nsec = (t % 1000) * 10000000;
-	nanosleep(&s, NULL);
+	nanosleep(&s, nullptr);
 }
 
 bool Stat(ByteString filename)
@@ -70,6 +70,26 @@ bool DirectoryExists(ByteString directory)
 		if(s.st_mode & S_IFDIR)
 		{
 			return true; // Is directory
+		}
+		else
+		{
+			return false; // Is file or something else
+		}
+	}
+	else
+	{
+		return false; // Doesn't exist
+	}
+}
+
+bool IsLink(ByteString path)
+{
+	struct stat s;
+	if (stat(path.c_str(), &s) == 0)
+	{
+		if (s.st_mode & S_IFLNK)
+		{
+			return true; // Is path
 		}
 		else
 		{
@@ -131,75 +151,7 @@ std::vector<ByteString> DirectoryList(ByteString directory)
 	return directoryList;
 }
 
-ByteString ExecutableName()
-{
-	auto firstApproximation = ExecutableNameFirstApprox();
-	auto rp = std::unique_ptr<char, decltype(std::free) *>(realpath(&firstApproximation[0], NULL), std::free);
-	if (!rp)
-	{
-		std::cerr << "realpath: " << errno << std::endl;
-		return "";
-	}
-	return rp.get();
-}
-
-void DoRestart()
-{
-	ByteString exename = ExecutableName();
-	if (exename.length())
-	{
-		execl(exename.c_str(), exename.c_str(), NULL);
-		int ret = errno;
-		fprintf(stderr, "cannot restart: execl(...) failed: code %i\n", ret);
-	}
-	else
-	{
-		fprintf(stderr, "cannot restart: no executable name???\n");
-	}
-	Exit(-1);
-}
-
-bool UpdateStart(const std::vector<char> &data)
-{
-	ByteString exeName = Platform::ExecutableName();
-
-	if (!exeName.length())
-		return false;
-
-	auto updName = exeName + "-update";
-
-	if (!WriteFile(data, updName))
-	{
-		RemoveFile(updName);
-		return false;
-	}
-
-	if (chmod(updName.c_str(), 0755))
-	{
-		RemoveFile(updName);
-		return false;
-	}
-
-	if (!RenameFile(updName, exeName, true))
-	{
-		RemoveFile(updName);
-		return false;
-	}
-
-	execl(exeName.c_str(), "powder-update", NULL);
-	return false; // execl returned, we failed
-}
-
-bool UpdateFinish()
-{
-	return true;
-}
-
-void UpdateCleanup()
-{
-}
-
-void SetupCrt()
+void AllocConsole()
 {
 }
 }

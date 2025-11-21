@@ -67,21 +67,10 @@ ConfirmPrompt::ConfirmPrompt(String title, String message, ResultCallback callba
 	MakeActiveWindow();
 }
 
-bool ConfirmPrompt::Blocking(String title, String message, String buttonText)
-{
-	bool outputResult;
-	new ConfirmPrompt(title, message, {
-		[&outputResult] { outputResult = true; ui::Engine::Ref().Break(); },
-		[&outputResult] { outputResult = false; ui::Engine::Ref().Break(); },
-	}, buttonText);
-	EngineProcess();
-	return outputResult;
-}
-
 void ConfirmPrompt::OnDraw()
 {
 	Graphics * g = GetGraphics();
 
-	g->clearrect(Position.X-2, Position.Y-2, Size.X+3, Size.Y+3);
-	g->drawrect(Position.X, Position.Y, Size.X, Size.Y, 200, 200, 200, 255);
+	g->DrawFilledRect(RectSized(Position - Vec2{ 1, 1 }, Size + Vec2{ 2, 2 }), 0x000000_rgb);
+	g->DrawRect(RectSized(Position, Size), 0xC8C8C8_rgb);
 }

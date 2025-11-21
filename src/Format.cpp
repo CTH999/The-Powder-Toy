@@ -8,14 +8,21 @@
 #include <stdexcept>
 #include <png.h>
 #include "Format.h"
-#include "graphics/Graphics.h"
+#include "graphics/VideoBuffer.h"
 
-ByteString format::UnixtimeToDate(time_t unixtime, ByteString dateFormat)
+ByteString format::UnixtimeToDate(time_t unixtime, ByteString dateFormat, bool local)
 {
 	struct tm * timeData;
 	char buffer[128];
 
-	timeData = localtime(&unixtime);
+	if (local)
+	{
+		timeData = localtime(&unixtime);
+	}
+	else
+	{
+		timeData = gmtime(&unixtime);
+	}
 
 	strftime(buffer, 128, dateFormat.c_str(), timeData);
 	return ByteString(buffer);
@@ -23,7 +30,7 @@ ByteString format::UnixtimeToDate(time_t unixtime, ByteString dateFormat)
 
 ByteString format::UnixtimeToDateMini(time_t unixtime)
 {
-	time_t currentTime = time(NULL);
+	time_t currentTime = time(nullptr);
 	struct tm currentTimeData = *gmtime(&currentTime);
 	struct tm timeData = *gmtime(&unixtime);
 
@@ -106,7 +113,7 @@ std::vector<char> format::PixelsToPPM(PlaneAdapter<std::vector<pixel>> const &in
 
 	for (int i = 0; i < input.Size().X * input.Size().Y; i++)
 	{
-		auto colour = RGB<uint8_t>::Unpack(input.data()[i]);
+		auto colour = RGB::Unpack(input.data()[i]);
 		data.push_back(colour.Red);
 		data.push_back(colour.Green);
 		data.push_back(colour.Blue);
@@ -116,22 +123,22 @@ std::vector<char> format::PixelsToPPM(PlaneAdapter<std::vector<pixel>> const &in
 }
 
 static std::unique_ptr<PlaneAdapter<std::vector<uint32_t>>> readPNG(
-	std::vector<char> const &data,
+	std::span<const char> data,
 	// If omitted,
 	//   RGB data is returned with A=0xFF
 	//   RGBA data is returned as itself
 	// If specified
 	//   RGB data is returned with A=0x00
 	//   RGBA data is blended against the background and returned with A=0x00
-	std::optional<RGB<uint8_t>> background
+	std::optional<RGB> background
 )
 {
 	png_infop info = nullptr;
 	auto deleter = [&info](png_struct *png) {
-		png_destroy_read_struct(&png, &info, NULL);
+		png_destroy_read_struct(&png, &info, nullptr);
 	};
 	auto png = std::unique_ptr<png_struct, decltype(deleter)>(
-		png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL,
+		png_create_read_struct(PNG_LIBPNG_VER_STRING, nullptr,
 			[](png_structp png, png_const_charp msg) {
 				fprintf(stderr, "PNG error: %s\n", msg);
 			},
@@ -211,12 +218,12 @@ static std::unique_ptr<PlaneAdapter<std::vector<uint32_t>>> readPNG(
 	return output;
 }
 
-std::unique_ptr<PlaneAdapter<std::vector<pixel_rgba>>> format::PixelsFromPNG(std::vector<char> const &data)
+std::unique_ptr<PlaneAdapter<std::vector<pixel_rgba>>> format::PixelsFromPNG(std::span<const char> data)
 {
 	return readPNG(data, std::nullopt);
 }
 
-std::unique_ptr<PlaneAdapter<std::vector<pixel>>> format::PixelsFromPNG(std::vector<char> const &data, RGB<uint8_t> background)
+std::unique_ptr<PlaneAdapter<std::vector<pixel>>> format::PixelsFromPNG(std::span<const char> data, RGB background)
 {
 	return readPNG(data, background);
 }
@@ -228,7 +235,7 @@ std::unique_ptr<std::vector<char>> format::PixelsToPNG(PlaneAdapter<std::vector<
 		png_destroy_write_struct(&png, &info);
 	};
 	auto png = std::unique_ptr<png_struct, decltype(deleter)>(
-		png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL,
+		png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr,
 			[](png_structp png, png_const_charp msg) {
 				fprintf(stderr, "PNG error: %s\n", msg);
 			},
@@ -265,18 +272,31 @@ std::unique_ptr<std::vector<char>> format::PixelsToPNG(PlaneAdapter<std::vector<
 
 	png_set_write_fn(png.get(), static_cast<void *>(&writeFn), [](png_structp png, png_bytep data, size_t length) {
 		(*static_cast<decltype(writeFn) *>(png_get_io_ptr(png)))(png, data, length);
-	}, NULL);
+	}, nullptr);
 	png_set_IHDR(png.get(), info, input.Size().X, input.Size().Y, 8, PNG_COLOR_TYPE_RGB, PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
 	png_write_info(png.get(), info);
 	png_set_filler(png.get(), 0x00, PNG_FILLER_AFTER);
 	png_set_bgr(png.get());
 	png_write_image(png.get(), const_cast<png_bytepp>(rowPointers.data()));
-	png_write_end(png.get(), NULL);
+	png_write_end(png.get(), nullptr);
 
 	return std::make_unique<std::vector<char>>(std::move(output));
 }
 
 const static char hex[] = "0123456789ABCDEF";
+
+ByteString format::Url::ToByteString() const
+{
+	ByteStringBuilder sb;
+	sb << base;
+	bool first = true;
+	for (auto &[ key, value ] : params)
+	{
+		sb << (first ? '?' : '&') << key << "=" << format::URLEncode(value);
+		first = false;
+	}
+	return sb.Build();
+}
 
 ByteString format::URLEncode(ByteString source)
 {
@@ -332,14 +352,14 @@ ByteString format::URLDecode(ByteString source)
 	return result;
 }
 
-void format::RenderTemperature(StringBuilder &sb, float temp, int scale)
+void format::RenderTemperature(StringBuilder &sb, float temp, TempScale scale)
 {
 	switch (scale)
 	{
-	case 1:
+	case TEMPSCALE_CELSIUS:
 		sb << (temp - 273.15f) << "C";
 		break;
-	case 2:
+	case TEMPSCALE_FAHRENHEIT:
 		sb << (temp - 273.15f) * 1.8f + 32.0f << "F";
 		break;
 	default:
@@ -348,24 +368,24 @@ void format::RenderTemperature(StringBuilder &sb, float temp, int scale)
 	}
 }
 
-float format::StringToTemperature(String str, int defaultScale)
+float format::StringToTemperature(String str, TempScale defaultScale)
 {
 	auto scale = defaultScale;
 	if (str.size())
 	{
 		if (str.EndsWith("K"))
 		{
-			scale = 0;
+			scale = TEMPSCALE_KELVIN;
 			str = str.SubstrFromEnd(1);
 		}
 		else if (str.EndsWith("C"))
 		{
-			scale = 1;
+			scale = TEMPSCALE_CELSIUS;
 			str = str.SubstrFromEnd(1);
 		}
 		else if (str.EndsWith("F"))
 		{
-			scale = 2;
+			scale = TEMPSCALE_FAHRENHEIT;
 			str = str.SubstrFromEnd(1);
 		}
 	}
@@ -376,11 +396,13 @@ float format::StringToTemperature(String str, int defaultScale)
 	auto out = str.ToNumber<float>();
 	switch (scale)
 	{
-	case 1:
+	case TEMPSCALE_CELSIUS:
 		out = out + 273.15;
 		break;
-	case 2:
+	case TEMPSCALE_FAHRENHEIT:
 		out = (out - 32.0f) / 1.8f + 273.15f;
+		break;
+	default:
 		break;
 	}
 	return out;

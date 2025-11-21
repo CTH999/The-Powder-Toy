@@ -1,12 +1,17 @@
 #pragma once
+#include "common/Bson.h"
 #include "common/Plane.h"
 #include "common/String.h"
+#include "common/tpt-rand.h"
+#include "common/Version.h"
 #include "simulation/Sign.h"
 #include "simulation/Particle.h"
+#include "simulation/MissingElements.h"
+#include "simulation/gravity/GravityData.h"
 #include "Misc.h"
 #include "SimulationConfig.h"
 #include <vector>
-#include <json/json.h>
+#include <array>
 
 struct sign;
 struct Particle;
@@ -52,58 +57,44 @@ public:
 	}
 };
 
-template<typename Item>
-struct [[deprecated("Use PlaneAdapter<std::vector>")]] Plane: PlaneAdapter<std::vector<Item>>
-{
-	[[deprecated("Use operator[](Vec2)")]]
-	Item *operator [](int y)
-	{
-		return &*PlaneAdapter<std::vector<Item>>::RowIterator(Vec2(0, y));
-	}
-
-	[[deprecated("Use operator[](Vec2)")]]
-	const Item *operator [](int y) const
-	{
-		return &*PlaneAdapter<std::vector<Item>>::RowIterator(Vec2(0, y));
-	}
-
-	[[deprecated("Use PlaneAdapter<std::vector>")]]
-	Plane() = default;
-
-	[[deprecated("Use PlaneAdapter<std::vector>")]]
-	Plane(int newWidth, int newHeight, Item defaultVal):
-		PlaneAdapter<std::vector<Item>>(Vec2(newWidth, newHeight), defaultVal)
-	{
-	}
-};
-
 class GameSave
 {
 	// number of pixels translated. When translating CELL pixels, shift all CELL grids
-	vector2d translated = { 0, 0 };
 	void readOPS(const std::vector<char> &data);
 	void readPSv(const std::vector<char> &data);
 	std::pair<bool, std::vector<char>> serialiseOPS() const;
 
+	void MapPalette();
+
 public:
-	int blockWidth = 0;
-	int blockHeight = 0;
+	Vec2<int> blockSize = { 0, 0 };
 	bool fromNewerVersion = false;
-	int majorVersion = 0;
-	int minorVersion = 0;
+	Version<2> version{};
 	bool hasPressure = false;
 	bool hasAmbientHeat = false;
+	bool hasBlockAirMaps = false;
+	bool hasGravityMaps = false;
+	bool ensureDeterminism = false; // only taken seriously by serializeOPS; readOPS may set this even if the save does not have everything required for determinism
+	bool hasRngState = false; // only written by readOPS, never read
+	RNG::State rngState;
+	uint64_t frameCount = 0;
 
 	//Simulation data
 	int particlesCount = 0;
 	std::vector<Particle> particles;
-	Plane<unsigned char> blockMap;
-	Plane<float> fanVelX;
-	Plane<float> fanVelY;
-	Plane<float> pressure;
-	Plane<float> velocityX;
-	Plane<float> velocityY;
-	Plane<float> ambientHeat;
+	PlaneAdapter<std::vector<unsigned char>> blockMap;
+	PlaneAdapter<std::vector<float>> fanVelX;
+	PlaneAdapter<std::vector<float>> fanVelY;
+	PlaneAdapter<std::vector<float>> pressure;
+	PlaneAdapter<std::vector<float>> velocityX;
+	PlaneAdapter<std::vector<float>> velocityY;
+	PlaneAdapter<std::vector<float>> ambientHeat;
+	PlaneAdapter<std::vector<unsigned char>> blockAir;
+	PlaneAdapter<std::vector<unsigned char>> blockAirh;
+	PlaneAdapter<std::vector<float>> gravMass;
+	PlaneAdapter<std::vector<uint32_t>> gravMask;
+	PlaneAdapter<std::vector<float>> gravForceX;
+	PlaneAdapter<std::vector<float>> gravForceY;
 
 	//Simulation Options
 	bool waterEEnabled = false;
@@ -116,8 +107,11 @@ public:
 	float customGravityY = 0.0f;
 	int airMode = 0;
 	float ambientAirTemp = R_TEMP + 273.15f;
+	float vorticityCoeff = 0.0f;
 	int edgeMode = 0;
 	bool wantAuthors = true;
+
+	MissingElements missingElements;
 
 	//Signs
 	std::vector<sign> signs;
@@ -128,18 +122,16 @@ public:
 	std::vector<PaletteItem> palette;
 
 	// author information
-	Json::Value authors;
+	Bson authors;
 
 	int pmapbits = 8; // default to 8 bits for older saves
 
-	GameSave(int width, int height);
+	GameSave(Vec2<int> newBlockSize);
 	GameSave(const std::vector<char> &data, bool newWantAuthors = true);
-	void setSize(int width, int height);
+	void setSize(Vec2<int> newBlockSize);
 	// return value is [ fakeFromNewerVersion, gameData ]
 	std::pair<bool, std::vector<char>> Serialise() const;
-	vector2d Translate(vector2d translate);
-	void Transform(matrix2d transform, vector2d translate);
-	void Transform(matrix2d transform, vector2d translate, vector2d translateReal, int newWidth, int newHeight);
+	void Transform(Mat2<int> transform, Vec2<int> nudge);
 
 	void Expand(const std::vector<char> &data);
 

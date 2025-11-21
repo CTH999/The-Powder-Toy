@@ -1,6 +1,6 @@
 #include "simulation/ElementCommon.h"
+#include "FIRE.h"
 
-int Element_FIRE_update(UPDATE_FUNC_ARGS);
 static int graphics(GRAPHICS_FUNC_ARGS);
 static void create(ELEMENT_CREATE_FUNC_ARGS);
 
@@ -8,7 +8,7 @@ void Element::Element_LAVA()
 {
 	Identifier = "DEFAULT_PT_LAVA";
 	Name = "LAVA";
-	Colour = PIXPACK(0xE05010);
+	Colour = 0xE05010_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_LIQUID;
 	Enabled = 1;
@@ -72,5 +72,5 @@ static int graphics(GRAPHICS_FUNC_ARGS)
 
 static void create(ELEMENT_CREATE_FUNC_ARGS)
 {
-	sim->parts[i].life = RNG::Ref().between(240, 359);
+	sim->parts[i].life = sim->rng.between(240, 359);
 }

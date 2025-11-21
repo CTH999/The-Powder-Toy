@@ -1,6 +1,7 @@
 #include "Prefs.h"
 #include "common/platform/Platform.h"
 #include "common/tpt-rand.h"
+#include "client/User.h"
 #include <fstream>
 #include <iostream>
 
@@ -19,7 +20,12 @@ void Prefs::Read()
 	Json::CharReaderBuilder rbuilder;
 	std::unique_ptr<Json::CharReader> const reader(rbuilder.newCharReader());
 	ByteString errs;
-	if (!reader->parse(&data[0], &data[0] + data.size(), &root, &errs))
+	if (!data.size())
+	{
+		std::cerr << "no json data" << std::endl;
+		return;
+	}
+	if (!reader->parse(data.data(), data.data() + data.size(), &root, &errs))
 	{
 		std::cerr << errs << std::endl;
 		return;
@@ -47,7 +53,7 @@ void Prefs::Write()
 	Json::StreamWriterBuilder wbuilder;
 	wbuilder["indentation"] = "\t";
 	ByteString data = Json::writeString(wbuilder, root);
-	if (!Platform::WriteFile(std::vector<char>(data.begin(), data.end()), path))
+	if (!Platform::WriteFile(data, path))
 	{
 		return;
 	}
@@ -114,6 +120,9 @@ template<> ByteString  Prefs::Bipacker<ByteString>::Unpack(const Json::Value &va
 
 template<> Json::Value Prefs::Bipacker<String>::Pack  (const String      &value) { return Json::Value(value.ToUtf8()); }
 template<> String      Prefs::Bipacker<String>::Unpack(const Json::Value &value) { return ByteString(value.asString()).FromUtf8(); }
+
+template<> Json::Value     Prefs::Bipacker<User::Elevation>::Pack  (const User::Elevation &value) { return Json::Value(User::ElevationToString(value)); }
+template<> User::Elevation Prefs::Bipacker<User::Elevation>::Unpack(const Json::Value     &value) { return User::ElevationFromString(value.asString()); }
 
 template<class Item>
 struct Prefs::Bipacker<std::vector<Item>>

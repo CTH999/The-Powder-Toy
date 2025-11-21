@@ -5,6 +5,7 @@
 #include "client/ThumbnailRendererTask.h"
 #include "common/platform/Platform.h"
 #include "graphics/Graphics.h"
+#include "graphics/VideoBuffer.h"
 #include "gui/Style.h"
 
 #include "gui/dialogues/ConfirmPrompt.h"
@@ -15,9 +16,9 @@
 
 #include "Config.h"
 
-LocalSaveActivity::LocalSaveActivity(SaveFile save, OnSaved onSaved_) :
+LocalSaveActivity::LocalSaveActivity(std::unique_ptr<SaveFile> newSave, OnSaved onSaved_) :
 	WindowActivity(ui::Point(-1, -1), ui::Point(220, 200)),
-	save(save),
+	save(std::move(newSave)),
 	thumbnailRenderer(nullptr),
 	onSaved(onSaved_)
 {
@@ -27,7 +28,7 @@ LocalSaveActivity::LocalSaveActivity(SaveFile save, OnSaved onSaved_) :
 	titleLabel->Appearance.VerticalAlign = ui::Appearance::AlignMiddle;
 	AddComponent(titleLabel);
 
-	filenameField = new ui::Textbox(ui::Point(8, 25), ui::Point(Size.X-16, 16), save.GetDisplayName(), "[filename]");
+	filenameField = new ui::Textbox(ui::Point(8, 25), ui::Point(Size.X-16, 16), save->GetDisplayName(), "[filename]");
 	filenameField->Appearance.VerticalAlign = ui::Appearance::AlignMiddle;
 	filenameField->Appearance.HorizontalAlign = ui::Appearance::AlignLeft;
 	AddComponent(filenameField);
@@ -53,14 +54,14 @@ LocalSaveActivity::LocalSaveActivity(SaveFile save, OnSaved onSaved_) :
 	AddComponent(okayButton);
 	SetOkayButton(okayButton);
 
-	if(save.GetGameSave())
+	if(save->GetGameSave())
 	{
-		thumbnailRenderer = new ThumbnailRendererTask(*save.GetGameSave(), Size - Vec2(16, 16), true, false);
+		thumbnailRenderer = new ThumbnailRendererTask(*save->GetGameSave(), Size - Vec2(16, 16), RendererSettings::decorationEnabled, false);
 		thumbnailRenderer->Start();
 	}
 }
 
-void LocalSaveActivity::OnTick(float dt)
+void LocalSaveActivity::OnTick()
 {
 	if (thumbnailRenderer)
 	{
@@ -82,8 +83,8 @@ void LocalSaveActivity::Save()
 	else if (filenameField->GetText().length())
 	{
 		ByteString finalFilename = ByteString::Build(LOCAL_SAVE_DIR, PATH_SEP_CHAR, filenameField->GetText().ToUtf8(), ".cps");
-		save.SetDisplayName(filenameField->GetText());
-		save.SetFileName(finalFilename);
+		save->SetDisplayName(filenameField->GetText());
+		save->SetFileName(finalFilename);
 		if (Platform::FileExists(finalFilename))
 		{
 			new ConfirmPrompt("Overwrite file", "Are you sure you wish to overwrite\n"+finalFilename.FromUtf8(), { [this, finalFilename] {
@@ -104,16 +105,20 @@ void LocalSaveActivity::Save()
 void LocalSaveActivity::saveWrite(ByteString finalFilename)
 {
 	Platform::MakeDirectory(LOCAL_SAVE_DIR);
-	GameSave *gameSave = save.GetGameSave();
-	Json::Value localSaveInfo;
+	Bson localSaveInfo;
 	localSaveInfo["type"] = "localsave";
-	localSaveInfo["username"] = Client::Ref().GetAuthUser().Username;
+	auto user = Client::Ref().GetAuthUser();
+	localSaveInfo["username"] = user ? user->Username : ByteString("");
 	localSaveInfo["title"] = finalFilename;
-	localSaveInfo["date"] = (Json::Value::UInt64)time(NULL);
-	Client::Ref().SaveAuthorInfo(&localSaveInfo);
-	gameSave->authors = localSaveInfo;
-	auto [ fromNewerVersion, saveData ] = gameSave->Serialise();
-	(void)fromNewerVersion;
+	localSaveInfo["date"] = int64_t(time(nullptr));
+	Client::Ref().SaveAuthorInfo(localSaveInfo);
+	{
+		auto gameSave = save->TakeGameSave();
+		gameSave->authors = localSaveInfo;
+		save->SetGameSave(std::move(gameSave));
+	}
+	std::vector<char> saveData;
+	std::tie(std::ignore, saveData) = save->GetGameSave()->Serialise();
 	if (saveData.size() == 0)
 		new ErrorMessage("Error", "Unable to serialize game data.");
 	else if (!Platform::WriteFile(saveData, finalFilename))
@@ -122,7 +127,7 @@ void LocalSaveActivity::saveWrite(ByteString finalFilename)
 	{
 		if (onSaved)
 		{
-			onSaved(&save);
+			onSaved(std::move(save));
 		}
 		Exit();
 	}

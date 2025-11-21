@@ -44,8 +44,8 @@ void ParticleDebug::Debug(int mode, int x, int y)
 			}
 		}
 	}
-	sim->framerender = 1;
 	auto prevToUpdate = sim->debug_nextToUpdate;
+	model->SetQueuedFrames(1);
 	model->UpdateUpTo(i + 1);
 	if (sim->debug_nextToUpdate)
 	{
@@ -60,7 +60,7 @@ void ParticleDebug::Debug(int mode, int x, int y)
 
 bool ParticleDebug::KeyPress(int key, int scan, bool shift, bool ctrl, bool alt, ui::Point currentMouse)
 {
-	if (key == 'f')
+	if (key == 'f' && !ctrl)
 	{
 		model->SetPaused(1);
 		if (alt)
