@@ -1,91 +1,92 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_SHLD2 PT_SHLD2 120
-Element_SHLD2::Element_SHLD2()
+#include "simulation/ElementCommon.h"
+
+static int update(UPDATE_FUNC_ARGS);
+
+void Element::Element_SHLD2()
 {
-    Identifier = "DEFAULT_PT_SHLD2";
-    Name = "SHD2";
-    Colour = PIXPACK(0x777777);
-    MenuVisible = 0;
-    MenuSection = SC_CRACKER2;
-    Enabled = 1;
-    
-    Advection = 0.0f;
-    AirDrag = 0.00f * CFDS;
-    AirLoss = 1.00f;
-    Loss = 0.00f;
-    Collision = 0.0f;
-    Gravity = 0.0f;
-    Diffusion = 0.00f;
-    HotAir = 0.000f	* CFDS;
-    Falldown = 0;
-    
-    Flammable = 0;
-    Explosive = 0;
-    Meltable = 0;
-    Hardness = 1;
-    
-    Weight = 100;
-    
-    Temperature = R_TEMP+0.0f	+273.15f;
-    HeatConduct = 0;
-    Description = "Shield lvl 2";
-    
-    State = ST_SOLID;
-    Properties = TYPE_SOLID|PROP_LIFE_DEC;
-    
-    LowPressure = IPL;
-    LowPressureTransition = NT;
-    HighPressure = 15.0f;
-    HighPressureTransition = PT_NONE;
-    LowTemperature = ITL;
-    LowTemperatureTransition = NT;
-    HighTemperature = ITH;
-    HighTemperatureTransition = NT;
-    
-    Update = &Element_SHLD2::update;
-    
+	Identifier = "DEFAULT_PT_SHLD2";
+	Name = "SHD2";
+	Colour = 0x777777_rgb;
+	MenuVisible = 0;
+	MenuSection = SC_SOLIDS;
+	Enabled = 1;
+
+	Advection = 0.0f;
+	AirDrag = 0.00f * CFDS;
+	AirLoss = 1.00f;
+	Loss = 0.00f;
+	Collision = 0.0f;
+	Gravity = 0.0f;
+	Diffusion = 0.00f;
+	HotAir = 0.000f	* CFDS;
+	Falldown = 0;
+
+	Flammable = 0;
+	Explosive = 0;
+	Meltable = 0;
+	Hardness = 1;
+
+	Weight = 100;
+
+	HeatConduct = 0;
+	Description = "Shield lvl 2.";
+
+	Properties = TYPE_SOLID|PROP_LIFE_DEC;
+
+	LowPressure = IPL;
+	LowPressureTransition = NT;
+	HighPressure = 15.0f;
+	HighPressureTransition = PT_NONE;
+	LowTemperature = ITL;
+	LowTemperatureTransition = NT;
+	HighTemperature = ITH;
+	HighTemperatureTransition = NT;
+
+	Update = &update;
 }
 
-//#TPT-Directive ElementHeader Element_SHLD2 static int update(UPDATE_FUNC_ARGS)
-int Element_SHLD2::update(UPDATE_FUNC_ARGS)
- {
-	int r, nnx, nny, rx, ry, np;
-	for (rx=-1; rx<2; rx++)
-		for (ry=-1; ry<2; ry++)
-			if (x+rx>=0 && y+ry>0 && x+rx<XRES && y+ry<YRES && (rx || ry))
+static int update(UPDATE_FUNC_ARGS)
+{
+	for (auto rx = -1; rx <= 1; rx++)
+	{
+		for (auto ry = -1; ry <= 1; ry++)
+		{
+			if (rx || ry)
 			{
-				r = pmap[y+ry][x+rx];
-				if (!r && parts[i].life>0)
-					sim->create_part(-1,x+rx,y+ry,PT_SHLD1);
+				auto r = pmap[y+ry][x+rx];
 				if (!r)
-					continue;
-				else if ((r&0xFF)==PT_SPRK&&parts[i].life==0)
 				{
-					if (25>rand()%200&&parts[i].life==0)
+					if (parts[i].life>0)
+						sim->create_part(-1,x+rx,y+ry,PT_SHLD1);
+					continue;
+				}
+				else if (TYP(r)==PT_SPRK&&parts[i].life==0)
+				{
+					if (sim->rng.chance(1, 8))
 					{
 						sim->part_change_type(i,x,y,PT_SHLD3);
 						parts[i].life = 7;
 					}
-					for ( nnx=-1; nnx<2; nnx++)
-						for ( nny=-1; nny<2; nny++)
+					for (auto nnx = -1; nnx <= 1; nnx++)
+					{
+						for (auto nny = -1; nny <= 1; nny++)
 						{
 							if (!pmap[y+ry+nny][x+rx+nnx])
 							{
-								np = sim->create_part(-1,x+rx+nnx,y+ry+nny,PT_SHLD1);
+								auto np = sim->create_part(-1,x+rx+nnx,y+ry+nny,PT_SHLD1);
 								if (np<0) continue;
 								parts[np].life=7;
 							}
 						}
+					}
 				}
-				else if ((r&0xFF)==PT_SHLD4&&4>rand()%10)
+				else if (TYP(r) == PT_SHLD4 && sim->rng.chance(2, 5))
 				{
 					sim->part_change_type(i,x,y,PT_SHLD3);
 					parts[i].life = 7;
 				}
 			}
+		}
+	}
 	return 0;
 }
-
-
-
-Element_SHLD2::~Element_SHLD2() {}

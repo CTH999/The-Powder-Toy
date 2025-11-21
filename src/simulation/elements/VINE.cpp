@@ -1,66 +1,72 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_VINE PT_VINE 114
-Element_VINE::Element_VINE()
+#include "simulation/ElementCommon.h"
+#include <algorithm>
+
+static int update(UPDATE_FUNC_ARGS);
+static int graphics(GRAPHICS_FUNC_ARGS);
+
+void Element::Element_VINE()
 {
-    Identifier = "DEFAULT_PT_VINE";
-    Name = "VINE";
-    Colour = PIXPACK(0x079A00);
-    MenuVisible = 1;
-    MenuSection = SC_SOLIDS;
-    Enabled = 1;
-    
-    Advection = 0.0f;
-    AirDrag = 0.00f * CFDS;
-    AirLoss = 0.95f;
-    Loss = 0.00f;
-    Collision = 0.0f;
-    Gravity = 0.0f;
-    Diffusion = 0.00f;
-    HotAir = 0.000f	* CFDS;
-    Falldown = 0;
-    
-    Flammable = 20;
-    Explosive = 0;
-    Meltable = 0;
-    Hardness = 10;
-    
-    Weight = 100;
-    
-    Temperature = R_TEMP+0.0f +273.15f;
-    HeatConduct = 65;
-    Description = "Vine, grows";
-    
-    State = ST_SOLID;
-    Properties = TYPE_SOLID;
-    
-    LowPressure = IPL;
-    LowPressureTransition = NT;
-    HighPressure = IPH;
-    HighPressureTransition = NT;
-    LowTemperature = ITL;
-    LowTemperatureTransition = NT;
-    HighTemperature = 573.0f;
-    HighTemperatureTransition = PT_FIRE;
-    
-    Update = &Element_VINE::update;
-    
+	Identifier = "DEFAULT_PT_VINE";
+	Name = "VINE";
+	Colour = 0x079A00_rgb;
+	MenuVisible = 1;
+	MenuSection = SC_SOLIDS;
+	Enabled = 1;
+
+	Advection = 0.0f;
+	AirDrag = 0.00f * CFDS;
+	AirLoss = 0.95f;
+	Loss = 0.00f;
+	Collision = 0.0f;
+	Gravity = 0.0f;
+	Diffusion = 0.00f;
+	HotAir = 0.000f	* CFDS;
+	Falldown = 0;
+
+	Flammable = 20;
+	Explosive = 0;
+	Meltable = 0;
+	Hardness = 10;
+
+	Weight = 100;
+
+	HeatConduct = 65;
+	Description = "Vine, can grow along WOOD.";
+
+	Properties = TYPE_SOLID;
+
+	LowPressure = IPL;
+	LowPressureTransition = NT;
+	HighPressure = IPH;
+	HighPressureTransition = NT;
+	LowTemperature = ITL;
+	LowTemperatureTransition = NT;
+	HighTemperature = 573.0f;
+	HighTemperatureTransition = PT_FIRE;
+
+	DefaultProperties.tmp = 1;
+
+	Update = &update;
+	Graphics = &graphics; // this used to be missing, maybe for a reason?
 }
 
-//#TPT-Directive ElementHeader Element_VINE static int update(UPDATE_FUNC_ARGS)
-int Element_VINE::update(UPDATE_FUNC_ARGS)
- {
-	int r, np, rx =(rand()%3)-1, ry=(rand()%3)-1;
-	if (x+rx>=0 && y+ry>0 && x+rx<XRES && y+ry<YRES && (rx || ry))
+static int update(UPDATE_FUNC_ARGS)
+{
+	int rndstore = sim->rng.gen();
+	auto rx = (rndstore % 3) - 1;
+	rndstore >>= 2;
+	auto ry = (rndstore % 3) - 1;
+	rndstore >>= 2;
+	if (rx || ry)
 	{
-		r = pmap[y+ry][x+rx];
-		if (1>rand()%15)
-			sim->part_change_type(i,x,y,PT_PLNT);
+		auto r = pmap[y+ry][x+rx];
+		if (!(rndstore % 15))
+			sim->part_change_type(i, x, y, PT_PLNT);
 		else if (!r)
 		{
-			np = sim->create_part(-1,x+rx,y+ry,PT_VINE);
+			auto np = sim->create_part(-1,x+rx,y+ry,PT_VINE);
 			if (np<0) return 0;
 			parts[np].temp = parts[i].temp;
-            parts[i].tmp = 1;
 			sim->part_change_type(i,x,y,PT_PLNT);
 		}
 	}
@@ -69,8 +75,7 @@ int Element_VINE::update(UPDATE_FUNC_ARGS)
 	return 0;
 }
 
-//#TPT-Directive ElementHeader Element_VINE static int graphics(GRAPHICS_FUNC_ARGS)
-int Element_VINE::graphics(GRAPHICS_FUNC_ARGS)
+static int graphics(GRAPHICS_FUNC_ARGS)
 {
 	float maxtemp = std::max((float)cpart->tmp2, cpart->temp);
 	if (maxtemp > 300)
@@ -86,6 +91,3 @@ int Element_VINE::graphics(GRAPHICS_FUNC_ARGS)
 	}
 	return 0;
 }
-
-
-Element_VINE::~Element_VINE() {}

@@ -1,26 +1,34 @@
-//
-//  Sign.h
-//  The Powder Toy
-//
-//  Created by Simon Robertshaw on 04/06/2012.
-//  Copyright (c) 2012 __MyCompanyName__. All rights reserved.
-//
+#pragma once
+#include "common/String.h"
+#include <utility>
 
-#ifndef The_Powder_Toy_Sign_h
-#define The_Powder_Toy_Sign_h
+struct RenderableSimulation;
 
-#include <string>
-
-class sign
+struct sign
 {
-public:
-	enum Justification { Left = 0, Centre = 1, Right = 2 };
-	sign(std::string text_, int x_, int y_, Justification justification_);
+	enum Justification
+	{
+		Left,
+		Middle,
+		Right,
+		None,
+		Max,
+	};
+
+	enum Type
+	{
+		Normal,
+		Save,
+		Thread,
+		Button,
+		Search
+	};
+
 	int x, y;
 	Justification ju;
-	std::string text;
+	String text;
 
-	void pos(int & x0, int & y0, int & w, int & h);
+	sign(String text_, int x_, int y_, Justification justification_);
+	String getDisplayText(const RenderableSimulation *sim, int &x, int &y, int &w, int &h, bool colorize = true, bool *v95 = nullptr) const;
+	std::pair<int, Type> split() const;
 };
-
-#endif
