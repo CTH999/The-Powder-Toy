@@ -1,11 +1,48 @@
 #pragma once
 #include "Config.h"
+#include "SimulationConfig.h"
 #include "common/String.h"
+
+inline ByteString VersionInfo()
+{
+	ByteStringBuilder sb;
+	sb << DISPLAY_VERSION[0] << "." << DISPLAY_VERSION[1];
+	if constexpr (!SNAPSHOT)
+	{
+		sb << "." << APP_VERSION.build;
+	}
+	sb << " " << IDENT;
+	if constexpr (MOD)
+	{
+		sb << " MOD " << MOD_ID << " UPSTREAM " << UPSTREAM_VERSION.build;
+	}
+	if constexpr (SNAPSHOT)
+	{
+		sb << " SNAPSHOT " << APP_VERSION.build;
+	}
+	if constexpr (LUACONSOLE)
+	{
+		sb << " LUACONSOLE";
+	}
+	if constexpr (NOHTTP)
+	{
+		sb << " NOHTTP";
+	}
+	else if constexpr (ENFORCE_HTTPS)
+	{
+		sb << " HTTPS";
+	}
+	if constexpr (DEBUG)
+	{
+		sb << " DEBUG";
+	}
+	return sb.Build();
+}
 
 inline ByteString IntroText()
 {
 	ByteStringBuilder sb;
-	sb << "\bl\bU" << APPNAME << "\bU - Version " << SAVE_VERSION << "." << MINOR_VERSION << " - https://powdertoy.co.uk, irc.libera.chat #powder, https://tpt.io/discord\n"
+	sb << "\bl\bU" << APPNAME << "\bU - Version " << DISPLAY_VERSION[0] << "." << DISPLAY_VERSION[1] << " - https://powdertoy.co.uk, irc.libera.chat #powder, https://tpt.io/discord\n"
 	      "\n"
 	      "\n"
 	      "\bgControl+C/V/X are Copy, Paste and cut respectively.\n"
@@ -23,10 +60,6 @@ inline ByteString IntroText()
 	      "Use 'S' to save parts of the window as 'stamps'. 'L' loads the most recent stamp, 'K' shows a library of stamps you saved.\n"
 	      "Use 'P' to take a screenshot and save it into the current directory.\n"
 	      "Use 'H' to toggle the HUD. Use 'D' to toggle debug mode in the HUD.\n"
-	      "\n"
-	      "Contributors: \bgStanislaw K Skowronek (Designed the original Powder Toy),\n"
-	      "\bgSimon Robertshaw, Skresanov Savely, cracker64, Catelite, Victoria Hoyle, Nathan Cousins, jacksonmj,\n"
-	      "\bgFelix Wallin, Lieuwe Mosch, Anthony Boot, Me4502, MaksProg, jacob1, mniip, LBPHacker\n"
 	      "\n";
 	if constexpr (BETA)
 	{
@@ -35,36 +68,8 @@ inline ByteString IntroText()
 	}
 	else
 	{
-		sb << "\bgTo use online features such as saving, you need to register at: \brhttps://powdertoy.co.uk/Register.html\n";
+		sb << "\bgTo use online features such as saving, you need to register at: \br" << SERVER << "/Register.html\n";
 	}
-	sb << "\n"
-	   << "\bt" << SAVE_VERSION << "." << MINOR_VERSION << "." << BUILD_NUM << " " << IDENT;
-	if constexpr (SNAPSHOT)
-	{
-		sb << " SNAPSHOT " << SNAPSHOT_ID;
-	}
-	else if constexpr (MOD)
-	{
-		sb << " MODVER " << SNAPSHOT_ID;
-	}
-	if constexpr (LUACONSOLE)
-	{
-		sb << " LUACONSOLE";
-	}
-#ifdef REALISTIC
-	sb << " REALISTIC";
-#endif
-	if constexpr (NOHTTP)
-	{
-		sb << " NOHTTP";
-	}
-	if constexpr (DEBUG)
-	{
-		sb << " DEBUG";
-	}
-	if constexpr (ENFORCE_HTTPS)
-	{
-		sb << " HTTPS";
-	}
+	sb << "\n\bt" << VersionInfo();
 	return sb.Build();
 }

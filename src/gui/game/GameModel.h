@@ -2,9 +2,17 @@
 #include "gui/interface/Colour.h"
 #include "client/User.h"
 #include "gui/interface/Point.h"
+#include "graphics/RendererSettings.h"
+#include "simulation/CustomGOLData.h"
+#include "simulation/SimulationSettings.h"
 #include <vector>
 #include <deque>
 #include <memory>
+#include <optional>
+#include <functional>
+#include <array>
+
+constexpr auto NUM_TOOLINDICES = 4;
 
 class Menu;
 class Tool;
@@ -20,6 +28,11 @@ class Renderer;
 class Snapshot;
 struct SnapshotDelta;
 class GameSave;
+
+namespace http
+{
+	class ExecVoteRequest;
+};
 
 class ToolSelection
 {
@@ -40,36 +53,43 @@ struct HistoryEntry
 
 class GameModel
 {
+
 private:
 	std::vector<Notification*> notifications;
-	//int clipboardSize;
-	//unsigned char * clipboardData;
-	std::unique_ptr<GameSave> clipboard;
 	std::unique_ptr<GameSave> placeSave;
 	std::unique_ptr<GameSave> transformedPlaceSave;
 	std::deque<String> consoleLog;
 	std::vector<GameView*> observers;
-	std::vector<Tool*> toolList;
 
-	//All tools that are associated with elements
-	std::vector<Tool*> elementTools;
-	//Tools that are present in elementTools, but don't have an associated menu and need to be freed manually
-	std::vector<Tool*> extraElementTools;
+	std::vector<std::unique_ptr<Tool>> tools;
+
+	void SanitizeToolsets();
+	void DeselectTool(ByteString identifier);
+	void InitTools();
 
 	Simulation * sim;
+	bool paused = false;
+	int queuedFrames = 0;
 	Renderer * ren;
-	std::vector<Menu*> menuList;
+	RendererSettings rendererSettings;
+	std::vector<std::unique_ptr<Menu>> menuList;
 	std::vector<QuickOption*> quickOptions;
 	int activeMenu;
 	int currentBrush;
 	std::vector<std::unique_ptr<Brush>> brushList;
-	std::unique_ptr<SaveInfo> currentSave;
+	struct SaveInfoWrapper
+	{
+		std::unique_ptr<SaveInfo> saveInfo;
+		std::optional<int> queuedVote;
+		std::unique_ptr<http::ExecVoteRequest> execVoteRequest;
+	};
+	SaveInfoWrapper currentSave;
 	std::unique_ptr<SaveFile> currentFile;
-	Tool * lastTool;
-	Tool ** activeTools;
-	Tool * decoToolset[4];
-	Tool * regularToolset[4];
-	User currentUser;
+	Tool *lastTool = nullptr;
+	Tool **activeTools = nullptr;
+	std::array<Tool *, NUM_TOOLINDICES> decoToolset;
+	std::array<Tool *, NUM_TOOLINDICES> regularToolset;
+	std::optional<User> currentUser;
 	float toolStrength;
 	std::deque<HistoryEntry> history;
 	std::unique_ptr<Snapshot> historyCurrent;
@@ -78,7 +98,7 @@ private:
 	bool mouseClickRequired;
 	bool includePressure;
 	bool perfectCircle = true;
-	int temperatureScale;
+	TempScale temperatureScale;
 
 	size_t activeColourPreset;
 	std::vector<ui::Colour> colourPresets;
@@ -87,6 +107,7 @@ private:
 
 	int edgeMode;
 	float ambientAirTemp;
+	float vorticityCoeff;
 	int decoSpace;
 
 	String infoTip;
@@ -99,7 +120,7 @@ private:
 	void notifySaveChanged();
 	void notifyBrushChanged();
 	void notifyMenuListChanged();
-	void notifyToolListChanged();
+	void notifyActiveMenuToolListChanged();
 	void notifyActiveToolsChanged();
 	void notifyUserChanged();
 	void notifyZoomChanged();
@@ -119,19 +140,34 @@ private:
 
 	void SaveToSimParameters(const GameSave &saveData);
 
+	bool threadedRendering = false;
+
+	GameView *view;
+
 public:
-	GameModel();
+	GameModel(GameView *newView);
 	~GameModel();
+
+	void Tick();
+
+	Tool *GetToolByIndex(int index);
 
 	void SetEdgeMode(int edgeMode);
 	int GetEdgeMode();
-	void SetTemperatureScale(int temperatureScale);
-	inline int GetTemperatureScale() const
+	void SetTemperatureScale(TempScale temperatureScale);
+	inline TempScale GetTemperatureScale() const
 	{
 		return temperatureScale;
 	}
+	void SetThreadedRendering(bool newThreadedRendering);
+	bool GetThreadedRendering() const
+	{
+		return threadedRendering;
+	}
 	void SetAmbientAirTemperature(float ambientAirTemp);
 	float GetAmbientAirTemperature();
+	void SetVorticityCoeff(float vorticityCoeff);
+	float GetVorticityCoeff();
 	void SetDecoSpace(int decoSpace);
 	int GetDecoSpace();
 
@@ -154,7 +190,6 @@ public:
 	String GetInfoTip();
 
 	void BuildMenus();
-	void BuildFavoritesMenu();
 	void BuildBrushList();
 	void BuildQuickOptionMenu(GameController * controller);
 
@@ -176,13 +211,27 @@ public:
 	Tool * GetLastTool();
 	void SetLastTool(Tool * newTool);
 	Tool *GetToolFromIdentifier(ByteString const &identifier);
-	Tool * GetElementTool(int elementID);
-	std::vector<Tool*> GetToolList();
-	std::vector<Tool*> GetUnlistedTools();
+	std::optional<int> GetToolIndex(Tool *tool);
+	std::vector<Tool *> GetActiveMenuToolList();
+	void AllocTool(std::unique_ptr<Tool> tool);
+	void AllocElementTool(int element);
+	void UpdateElementTool(int element);
+	void AllocCustomGolTool(const CustomGOLData &gd);
+	void FreeTool(Tool *tool);
+
+	const std::vector<std::unique_ptr<Tool>> &GetTools()
+	{
+		return tools;
+	}
 
 	Brush &GetBrush();
 	Brush *GetBrushByID(int i);
 	int GetBrushID();
+	int GetBrushIndex(const Brush &brush);
+	int BrushListSize() const
+	{
+		return int(brushList.size());
+	}
 	void SetBrushID(int i);
 
 	void SetVote(int direction);
@@ -195,7 +244,7 @@ public:
 	void AddObserver(GameView * observer);
 
 	void SetPaused(bool pauseState);
-	bool GetPaused();
+	bool GetPaused() const;
 	void SetDecoration(bool decorationState);
 	bool GetDecoration();
 	void SetAHeatEnable(bool aHeat);
@@ -211,10 +260,14 @@ public:
 	void SetActiveMenu(int menuID);
 	int GetActiveMenu();
 	void FrameStep(int frames);
-	User GetUser();
-	void SetUser(User user);
+	const std::optional<User> &GetUser() const;
+	void SetUser(std::optional<User> user);
 	Simulation * GetSimulation();
 	Renderer * GetRenderer();
+	RendererSettings &GetRendererSettings()
+	{
+		return rendererSettings;
+	}
 	void SetZoomEnabled(bool enabled);
 	bool GetZoomEnabled();
 	void SetZoomSize(int size);
@@ -230,7 +283,10 @@ public:
 	void SetClipboard(std::unique_ptr<GameSave> save);
 	void SetPlaceSave(std::unique_ptr<GameSave> save);
 	void TransformPlaceSave(Mat2<int> transform, Vec2<int> nudge);
+
+	std::function<void (String)> logSink;
 	void Log(String message, bool printToFile);
+
 	std::deque<String> GetLog();
 	const GameSave *GetClipboard() const;
 	const GameSave *GetPlaceSave() const;
@@ -249,7 +305,11 @@ public:
 	void AddNotification(Notification * notification);
 	void RemoveNotification(Notification * notification);
 
-	bool RemoveCustomGOLType(const ByteString &identifier);
+	bool AddCustomGol(String ruleString, String nameString, RGB color1, RGB color2);
+	bool RemoveCustomGol(const ByteString &identifier);
+	void LoadCustomGol();
+	void SaveCustomGol();
+	std::optional<CustomGOLData> CheckCustomGol(String ruleString, String nameString, RGB color1, RGB color2);
 
 	ByteString SelectNextIdentifier;
 	int SelectNextTool;
@@ -257,4 +317,22 @@ public:
 	void UpdateUpTo(int upTo);
 	void BeforeSim();
 	void AfterSim();
+
+	GameView *GetView() const
+	{
+		return view;
+	}
+
+	int GetQueuedFrames() const
+	{
+		return queuedFrames;
+	}
+	void SetQueuedFrames(int newQueuedFrames)
+	{
+		queuedFrames = newQueuedFrames;
+	}
+	bool IsSimRunning() const
+	{
+		return !paused || queuedFrames;
+	}
 };

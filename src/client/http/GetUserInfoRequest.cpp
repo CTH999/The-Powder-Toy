@@ -5,18 +5,20 @@
 namespace http
 {
 	GetUserInfoRequest::GetUserInfoRequest(ByteString username) :
-		APIRequest(ByteString::Build(SCHEME, SERVER, "/User.json?Name=", username))
+		APIRequest({ ByteString::Build(SERVER, "/User.json"), {
+			{ "Name", username },
+		} }, authOmit, false)
 	{
 	}
 
-	std::unique_ptr<UserInfo> GetUserInfoRequest::Finish()
+	UserInfo GetUserInfoRequest::Finish()
 	{
-		std::unique_ptr<UserInfo> user_info;
 		auto result = APIRequest::Finish();
-		if (result.document)
+		UserInfo userInfo;
+		try
 		{
-			auto &user = (*result.document)["User"];
-			user_info = std::unique_ptr<UserInfo>(new UserInfo(
+			auto &user = result["User"];
+			userInfo = UserInfo{
 				user["ID"].asInt(),
 				user["Age"].asInt(),
 				user["Username"].asString(),
@@ -29,9 +31,17 @@ namespace http
 				user["Forum"]["Topics"].asInt(),
 				user["Forum"]["Replies"].asInt(),
 				user["Forum"]["Reputation"].asInt()
-			));
+			};
+			if (user.isMember("RegisterTime"))
+			{
+				userInfo.registeredAt = ByteString(user["RegisterTime"].asString()).ToNumber<time_t>();
+			}
 		}
-		return user_info;
+		catch (const std::exception &ex)
+		{
+			throw RequestError("Could not read response: " + ByteString(ex.what()));
+		}
+		return userInfo;
 	}
 }
 

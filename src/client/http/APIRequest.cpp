@@ -1,35 +1,49 @@
 #include "APIRequest.h"
-
 #include "client/Client.h"
 
 namespace http
 {
-	APIRequest::APIRequest(ByteString url) : Request(url)
+	namespace
 	{
-		User user = Client::Ref().GetAuthUser();
-		AuthHeaders(ByteString::Build(user.UserID), user.SessionID);
+		format::Url &MaybeAppendSession(APIRequest::AuthMode authMode, format::Url &url)
+		{
+			if (auto user = Client::Ref().GetAuthUser(); user && authMode == APIRequest::authRequireAppendSession)
+			{
+				url.params["Key"] = user->SessionKey;
+			}
+			return url;
+		}
 	}
 
-	APIRequest::Result APIRequest::Finish()
+	APIRequest::APIRequest(format::Url url, AuthMode authMode, bool newCheckStatus) : Request(MaybeAppendSession(authMode, url).ToByteString()), checkStatus(newCheckStatus)
 	{
-		Result result;
+		auto user = Client::Ref().GetAuthUser();
+		if ((authMode == authRequire ||
+		     authMode == authRequireAppendSession) && !user)
+		{
+			FailEarly("Not authenticated");
+			return;
+		}
+		if (authMode != authOmit && user)
+		{
+			AuthHeaders(ByteString::Build(user->UserID), user->SessionID);
+		}
+	}
+
+	Json::Value APIRequest::Finish()
+	{
+		auto [ status, data ] = Request::Finish();
+		ParseResponse(data, status, checkStatus ? responseJson : responseData);
+		Json::Value document;
 		try
 		{
-			ByteString data;
-			std::tie(result.status, data) = Request::Finish();
-			Client::Ref().ParseServerReturn(data, result.status, true);
-			if (result.status == 200 && data.size())
-			{
-				std::istringstream dataStream(data);
-				Json::Value objDocument;
-				dataStream >> objDocument;
-				result.document = std::unique_ptr<Json::Value>(new Json::Value(objDocument));
-			}
+			std::istringstream ss(data);
+			ss >> document;
 		}
-		catch (std::exception & e)
+		catch (const std::exception &ex)
 		{
+			throw RequestError("Could not read response: " + ByteString(ex.what()));
 		}
-		return result;
+		return document;
 	}
 }
-

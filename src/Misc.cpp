@@ -1,9 +1,9 @@
 #include "Misc.h"
-#include "common/tpt-minmax.h"
 #include "common/String.h"
 #include <cstring>
 #include <sys/types.h>
 #include <cmath>
+#include <algorithm>
 
 void HSV_to_RGB(int h,int s,int v,int *r,int *g,int *b)//convert 0-255(0-360 for H) HSV values to 0-255 RGB
 {
@@ -73,16 +73,6 @@ void RGB_to_HSV(int r,int g,int b,int *h,int *s,int *v)//convert 0-255 RGB value
  		*h = (int)(60.0*(d - c/(x - a)));
  		*s = (int)(255.0*((x - a)/x));
  		*v = (int)(255.0*x);
-	}
-}
-
-void membwand(void * destv, void * srcv, size_t destsize, size_t srcsize)
-{
-	size_t i;
-	unsigned char * dest = (unsigned char*)destv;
-	unsigned char * src = (unsigned char*)srcv;
-	for(i = 0; i < destsize; i++){
-		dest[i] = dest[i] & src[i%srcsize];
 	}
 }
 

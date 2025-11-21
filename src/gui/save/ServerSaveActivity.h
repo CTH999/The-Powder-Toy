@@ -11,7 +11,12 @@
 #include "graphics/Pixel.h"
 #include "tasks/TaskListener.h"
 
-#include "save_online.png.h"
+#include "save_online_png.h"
+
+namespace http
+{
+	class UploadSaveRequest;
+}
 
 namespace ui
 {
@@ -25,10 +30,10 @@ class Task;
 class VideoBuffer;
 class ServerSaveActivity: public WindowActivity, public TaskListener
 {
+	std::unique_ptr<http::UploadSaveRequest> uploadSaveRequest;
+
 	using OnUploaded = std::function<void (std::unique_ptr<SaveInfo>)>;
-	std::unique_ptr<PlaneAdapter<std::vector<pixel_rgba>>> saveToServerImage = format::PixelsFromPNG(
-		std::vector<char>(save_online_png, save_online_png + save_online_png_size)
-	);
+	std::unique_ptr<PlaneAdapter<std::vector<pixel_rgba>>> saveToServerImage = format::PixelsFromPNG(save_online_png.AsCharSpan());
 
 public:
 	ServerSaveActivity(std::unique_ptr<SaveInfo> newSave, OnUploaded onUploaded);
@@ -40,7 +45,7 @@ public:
 	void ShowRules();
 	void CheckName(String newname);
 	virtual void OnDraw() override;
-	virtual void OnTick(float dt) override;
+	virtual void OnTick() override;
 	virtual ~ServerSaveActivity();
 protected:
 	void AddAuthorInfo();

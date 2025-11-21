@@ -39,7 +39,7 @@ class LoadFilesTask: public Task
 	bool doWork() override
 	{
 		std::vector<ByteString> files = Platform::DirectorySearch(directory, search, { ".cps" });
-		std::sort(files.rbegin(), files.rend(), [](ByteString a, ByteString b) { return a.ToLower() < b.ToLower(); });
+		std::sort(files.rbegin(), files.rend(), [](ByteString a, ByteString b) { return a.ToLower() > b.ToLower(); });
 
 		notifyProgress(-1);
 		for(std::vector<ByteString>::iterator iter = files.begin(), end = files.end(); iter != end; ++iter)
@@ -141,29 +141,36 @@ void FileBrowserActivity::SelectSave(int index)
 
 void FileBrowserActivity::DeleteSave(int index)
 {
-	auto &file = files[index];
-	String deleteMessage = "Are you sure you want to delete " + file->GetDisplayName() + ".cps?";
-	if (ConfirmPrompt::Blocking("Delete Save", deleteMessage))
-	{
+	String deleteMessage = "Are you sure you want to delete " + files[index]->GetDisplayName() + ".cps?";
+	new ConfirmPrompt("Delete Save", deleteMessage, { [this, index]() {
+		auto &file = files[index];
 		Platform::RemoveFile(file->GetName());
 		loadDirectory(directory, "");
-	}
+	} });
 }
 
 void FileBrowserActivity::RenameSave(int index)
 {
-	auto &file = files[index];
-	ByteString newName = TextPrompt::Blocking("Rename", "Change save name", file->GetDisplayName(), "", 0).ToUtf8();
-	if (newName.length())
-	{
-		newName = ByteString::Build(directory, PATH_SEP_CHAR, newName, ".cps");
-		if (!Platform::RenameFile(file->GetName(), newName, false))
-			ErrorMessage::Blocking("Error", "Could not rename file");
+	new TextPrompt("Rename", "Change save name", files[index]->GetDisplayName(), "", 0, { [this, index](const String &input) {
+		auto &file = files[index];
+		auto newName = input.ToUtf8();
+		if (newName.length())
+		{
+			newName = ByteString::Build(directory, PATH_SEP_CHAR, newName, ".cps");
+			if (!Platform::RenameFile(file->GetName(), newName, false))
+			{
+				new ErrorMessage("Error", "Could not rename file");
+			}
+			else
+			{
+				loadDirectory(directory, "");
+			}
+		}
 		else
-			loadDirectory(directory, "");
-	}
-	else
-		ErrorMessage::Blocking("Error", "No save name given");
+		{
+			new ErrorMessage("Error", "No save name given");
+		}
+	} });
 }
 
 void FileBrowserActivity::cleanup()
@@ -205,7 +212,7 @@ void FileBrowserActivity::NotifyDone(Task * task)
 	createButtons = true;
 	totalFiles = files.size();
 	delete loadFiles;
-	loadFiles = NULL;
+	loadFiles = nullptr;
 	if (!files.size())
 	{
 		progressBar->Visible = false;
@@ -252,7 +259,7 @@ void FileBrowserActivity::NotifyStatus(Task * task)
 
 }
 
-void FileBrowserActivity::OnTick(float dt)
+void FileBrowserActivity::OnTick()
 {
 	if(loadFiles)
 		loadFiles->Poll();
@@ -276,7 +283,7 @@ void FileBrowserActivity::OnTick(float dt)
 							ui::Point(buttonWidth, buttonHeight),
 							saveFile.get());
 			saveButton->AddContextMenu(1);
-			saveButton->Tick(dt);
+			saveButton->Tick();
 			saveButton->SetActionCallback({
 				[this, i] { SelectSave(i); },
 				[this, i] { RenameSave(i); },

@@ -49,10 +49,10 @@ struct SnapshotDelta
 	HunkVector<uint32_t> commonParticles;
 	std::vector<Particle> extraPartsOld, extraPartsNew;
 
-	HunkVector<float> GravVelocityX;
-	HunkVector<float> GravVelocityY;
-	HunkVector<float> GravValue;
-	HunkVector<float> GravMap;
+	HunkVector<float> GravMass;
+	HunkVector<uint32_t> GravMask;
+	HunkVector<float> GravForceX;
+	HunkVector<float> GravForceY;
 
 	HunkVector<unsigned char> BlockMap;
 	HunkVector<unsigned char> ElecMap;
@@ -70,7 +70,7 @@ struct SnapshotDelta
 	SingleDiff<uint64_t> FrameCount;
 	SingleDiff<RNG::State> RngState;
 
-	SingleDiff<Json::Value> Authors;
+	SingleDiff<Bson> Authors;
 
 	static std::unique_ptr<SnapshotDelta> FromSnapshots(const Snapshot &oldSnap, const Snapshot &newSnap);
 	std::unique_ptr<Snapshot> Forward(const Snapshot &oldSnap);

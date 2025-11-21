@@ -1,4 +1,4 @@
-The Powder Toy - January 2023
+The Powder Toy - February 2025
 ==========================
 
 Get the latest version [from the Powder Toy website](https://powdertoy.co.uk/Download.html).
@@ -17,13 +17,13 @@ Build instructions
 
 See the _Powder Toy Development Help_ section [on the main page of the wiki](https://powdertoy.co.uk/Wiki/W/Main_Page.html).
 
-Thanks
+Special Thanks
 ===========================================================================
 
-* Stanislaw K Skowronek - Designed the original
-* Simon Robertshaw
+* Stanislaw K Skowronek - Designed the original Powder Toy
+* Simon Robertshaw - Wrote the website, current server owner
 * Skresanov Savely
-* cracker64
+* Pilihp64
 * Catelite
 * Victoria Hoyle
 * Nathan Cousins
@@ -40,7 +40,6 @@ Thanks
 Libraries and other assets used
 ===========================================================================
 
-* [BSON](https://github.com/interactive-matter/bson-c)
 * [bzip2](http://www.bzip.org/)
 * [FFTW](http://fftw.org/)
 * [JsonCpp](https://github.com/open-source-parsers/jsoncpp)
@@ -51,7 +50,6 @@ Libraries and other assets used
 * [Mallangche](https://github.com/JammPark/Mallangche)
 * [mbedtls](https://www.trustedfirmware.org/projects/mbed-tls/)
 * [SDL](https://libsdl.org/)
-* [zlib](https://www.zlib.net/)
 
 Instructions
 ===========================================================================
@@ -82,6 +80,7 @@ Controls
 | I                       | Invert Pressure and Velocity map                                |
 | W                       | Cycle gravity modes (use with Ctrl when STK2 is out)            |
 | Y                       | Cycle air modes                                                 |
+| Ctrl + E                | Cycle edge modes                                                |
 | B                       | Enter decoration editor menu                                    |
 | Ctrl + B                | Toggle decorations on/off                                       |
 | N                       | Toggle Newtonian Gravity on/off                                 |
@@ -107,6 +106,7 @@ Controls
 | Shift + R               | Horizontal mirror for selected area when pasting stamps         |
 | Ctrl + Shift + R        | Vertical mirror for selected area when pasting stamps           |
 | R                       | Rotate selected area counterclockwise when pasting stamps       |
+| F11                     | Toggle fullscreen                                               |
 
 Command Line
 ---------------------------------------------------------------------------
@@ -122,5 +122,6 @@ Command Line
 | `disable-network`     | Disables internet connections                    |                                             |
 | `disable-bluescreen`  | Disable bluescreen handler                       |                                             |
 | `redirect`            | Redirects output to stdout.txt / stderr.txt      |                                             |
+| `console`             | Redirects output to a new console on Windows     |                                             |
 | `cafile:CAFILE`       | Set certificate bundle path                      | `cafile:/etc/ssl/certs/ca-certificates.crt` |
 | `capath:CAPATH`       | Set certificate directory path                   | `capath:/etc/ssl/certs`                     |

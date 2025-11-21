@@ -31,7 +31,7 @@ void Element::Element_H2()
 	HeatConduct = 251;
 	Description = "Hydrogen. Combusts with OXYG to make WATR. Undergoes fusion at high temperature and pressure.";
 
-	Properties = TYPE_GAS;
+	Properties = TYPE_GAS | PROP_PHOTPASS;
 
 	LowPressure = IPL;
 	LowPressureTransition = NT;
@@ -47,15 +47,18 @@ void Element::Element_H2()
 
 static int update(UPDATE_FUNC_ARGS)
 {
-	int r,rx,ry,rt;
-	for (rx=-2; rx<3; rx++)
-		for (ry=-2; ry<3; ry++)
-			if (BOUNDS_CHECK && (rx || ry))
+	auto &sd = SimulationData::CRef();
+	auto &can_move = sd.can_move;
+	for (auto rx = -2; rx <= 2; rx++)
+	{
+		for (auto ry = -2; ry <= 2; ry++)
+		{
+			if (rx || ry)
 			{
-				r = pmap[y+ry][x+rx];
+				auto r = pmap[y+ry][x+rx];
 				if (!r)
 					continue;
-				rt = TYP(r);
+				auto rt = TYP(r);
 				if (sim->pv[y/CELL][x/CELL] > 8.0f && rt == PT_DESL) // This will not work. DESL turns to fire above 5.0 pressure
 				{
 					sim->part_change_type(ID(r),x+rx,y+ry,PT_WATR);
@@ -90,6 +93,8 @@ static int update(UPDATE_FUNC_ARGS)
 					}
 				}
 			}
+		}
+	}
 	if (parts[i].temp > 2273.15 && sim->pv[y/CELL][x/CELL] > 50.0f)
 	{
 		if (sim->rng.chance(1, 5))
@@ -115,8 +120,8 @@ static int update(UPDATE_FUNC_ARGS)
 				parts[j].temp = temp;
 				parts[j].tmp = 0x1;
 			}
-			rx = x + sim->rng.between(-1, 1), ry = y + sim->rng.between(-1, 1), rt = TYP(pmap[ry][rx]);
-			if (sim->can_move[PT_PLSM][rt] || rt == PT_H2)
+			auto rx = x + sim->rng.between(-1, 1), ry = y + sim->rng.between(-1, 1), rt = TYP(pmap[ry][rx]);
+			if (can_move[PT_PLSM][rt] || rt == PT_H2)
 			{
 				j = sim->create_part(-3,rx,ry,PT_PLSM);
 				if (j>-1)

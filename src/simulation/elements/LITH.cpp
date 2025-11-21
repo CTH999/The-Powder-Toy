@@ -25,7 +25,7 @@ void Element::Element_LITH()
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 0;
-	Hardness = 15;
+	Hardness = 14;
 
 	Weight = 17;
 
@@ -80,7 +80,7 @@ static int update(UPDATE_FUNC_ARGS)
 	{
 		for (int ry = -2; ry <= 2; ++ry)
 		{
-			if (BOUNDS_CHECK && (rx || ry))
+			if (rx || ry)
 			{
 				int neighborData = pmap[y + ry][x + rx];
 				if (!neighborData)
@@ -92,6 +92,8 @@ static int update(UPDATE_FUNC_ARGS)
 					continue;
 				}
 				Particle &neighbor = parts[ID(neighborData)];
+
+				auto pavg = sim->parts_avg(i, ID(neighborData), PT_INSL);
 
 				switch (TYP(neighborData))
 				{
@@ -134,7 +136,7 @@ static int update(UPDATE_FUNC_ARGS)
 					break;
 
 				case PT_SPRK:
-					if (sim->parts_avg(i, ID(neighborData), PT_INSL) == PT_INSL)
+					if (pavg == PT_INSL || pavg == PT_RSSS)
 					{
 						break;
 					}
@@ -149,7 +151,7 @@ static int update(UPDATE_FUNC_ARGS)
 					break;
 
 				case PT_NSCN:
-					if (sim->parts_avg(i, ID(neighborData), PT_INSL) == PT_INSL)
+					if (pavg == PT_INSL || pavg == PT_RSSS)
 					{
 						break;
 					}
@@ -198,7 +200,7 @@ static int update(UPDATE_FUNC_ARGS)
 	{
 		int rx = sim->rng.between(-3, 3);
 		int ry = sim->rng.between(-3, 3);
-		if (BOUNDS_CHECK && (rx || ry))
+		if (rx || ry)
 		{
 			int neighborData = pmap[y + ry][x + rx];
 			if (TYP(neighborData) != PT_LITH)
@@ -231,12 +233,12 @@ static int update(UPDATE_FUNC_ARGS)
 		sim->part_change_type(i, x, y, PT_LAVA);
 		if (carbonationFactor < 3)
 		{
-			self.temp = 500.f + storedEnergy * 10;
+			self.temp = restrict_flt(500.f + storedEnergy * 10, MIN_TEMP, MAX_TEMP);
 			self.ctype = PT_LITH;
 		}
 		else
 		{
-			self.temp = 2000.f + storedEnergy * 10;
+			self.temp = restrict_flt(2000.f + storedEnergy * 10, MIN_TEMP, MAX_TEMP);
 			self.ctype = PT_GLAS;
 		}
 	}
@@ -257,7 +259,7 @@ static int graphics(GRAPHICS_FUNC_ARGS)
 	// Charged lith
 	else if (cpart->ctype > 0)
 	{
-		int mult = ren->rng.between(cpart->ctype / 3, cpart->ctype) / 15;
+		int mult = gfctx.rng.between(cpart->ctype / 3, cpart->ctype) / 15;
 		mult = std::min(6, mult);
 		*colr -= 30 * mult;
 		*colb += 20 * mult;

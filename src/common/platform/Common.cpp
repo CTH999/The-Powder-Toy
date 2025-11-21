@@ -3,7 +3,6 @@
 #include "common/tpt-rand.h"
 #include "Config.h"
 #include <memory>
-#include <list>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -59,7 +58,7 @@ bool ReadFile(std::vector<char> &fileData, ByteString filename)
 	if (f) f.seekg(0, std::ios::end);
 	if (f) fileData.resize(f.tellg());
 	if (f) f.seekg(0);
-	if (f) f.read(&fileData[0], fileData.size());
+	if (f && fileData.size()) f.read(fileData.data(), fileData.size());
 	if (!f)
 	{
 		std::cerr << "ReadFile: " << filename << ": " << strerror(errno) << std::endl;
@@ -68,7 +67,7 @@ bool ReadFile(std::vector<char> &fileData, ByteString filename)
 	return true;
 }
 
-bool WriteFile(const std::vector<char> &fileData, ByteString filename)
+bool WriteFile(std::span<const char> fileData, ByteString filename)
 {
 	auto replace = FileExists(filename);
 	auto writeFileName = filename;
@@ -86,7 +85,7 @@ bool WriteFile(const std::vector<char> &fileData, ByteString filename)
 	bool ok = false;
 	{
 		std::ofstream f(writeFileName, std::ios::binary);
-		if (f) f.write(&fileData[0], fileData.size());
+		if (f) f.write(fileData.data(), fileData.size());
 		ok = bool(f);
 	}
 	if (!ok)
@@ -107,21 +106,5 @@ bool WriteFile(const std::vector<char> &fileData, ByteString filename)
 		}
 	}
 	return true;
-}
-
-std::list<ExitFunc> exitFuncs;
-
-void Atexit(ExitFunc exitFunc)
-{
-	exitFuncs.push_front(exitFunc);
-}
-
-void Exit(int code)
-{
-	for (auto exitFunc : exitFuncs)
-	{
-		exitFunc();
-	}
-	exit(code);
 }
 }

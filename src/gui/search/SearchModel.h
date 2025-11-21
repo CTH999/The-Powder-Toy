@@ -1,26 +1,33 @@
 #pragma once
 #include "common/String.h"
-#include "client/http/Request.h"
+#include "client/Search.h"
 #include "Config.h"
 #include <vector>
 #include <atomic>
 #include <memory>
+
+namespace http
+{
+	class SearchSavesRequest;
+	class SearchTagsRequest;
+}
 
 class SaveInfo;
 class SearchView;
 class SearchModel
 {
 private:
-	std::unique_ptr<http::Request> searchSaves;
-	void BeginSearchSaves(int start, int count, String query, ByteString sort, ByteString category);
+	std::unique_ptr<http::SearchSavesRequest> searchSaves;
+	void BeginSearchSaves(int start, int count, String query, http::Period period, http::Sort sort, http::Category category);
 	std::vector<std::unique_ptr<SaveInfo>> EndSearchSaves();
 
 	void BeginGetTags(int start, int count, String query);
 	std::vector<std::pair<ByteString, int>> EndGetTags();
-	std::unique_ptr<http::Request> getTags;
+	std::unique_ptr<http::SearchTagsRequest> getTags;
 
 	std::unique_ptr<SaveInfo> loadedSave;
-	ByteString currentSort;
+	http::Period currentPeriod;
+	http::Sort currentSort;
 	String lastQuery;
 	String lastError;
 	std::vector<int> selected;
@@ -29,6 +36,7 @@ private:
 	std::vector<std::pair<ByteString, int> > tagList;
 	int currentPage;
 	int resultCount;
+	bool includesFp;
 	bool showOwn;
 	bool showFavourite;
 	bool showTags;
@@ -36,6 +44,7 @@ private:
 	void notifyTagListChanged();
 	void notifySelectedChanged();
 	void notifyPageChanged();
+	void notifyPeriodChanged();
 	void notifySortChanged();
 	void notifyShowOwnChanged();
 	void notifyShowFavouriteChanged();
@@ -55,8 +64,10 @@ public:
 	int GetPageCount();
 	int GetPageNum() { return currentPage; }
 	String GetLastQuery() { return lastQuery; }
-	void SetSort(ByteString sort) { if(!searchSaves) { currentSort = sort; } notifySortChanged(); }
-	ByteString GetSort() { return currentSort; }
+	void SetPeriod(http::Period period) { if(!searchSaves) { currentPeriod = period; } notifyPeriodChanged(); }
+	http::Period GetPeriod() { return currentPeriod; }
+	void SetSort(http::Sort sort) { if(!searchSaves) { currentSort = sort; } notifySortChanged(); }
+	http::Sort GetSort() { return currentSort; }
 	void SetShowOwn(bool show) { if(!searchSaves) { if(show!=showOwn) { showOwn = show; } } notifyShowOwnChanged();  }
 	bool GetShowOwn() { return showOwn; }
 	void SetShowFavourite(bool show) { if(show!=showFavourite && !searchSaves) { showFavourite = show; } notifyShowFavouriteChanged();  }

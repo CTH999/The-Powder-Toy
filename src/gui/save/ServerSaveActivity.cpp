@@ -1,7 +1,6 @@
 #include "ServerSaveActivity.h"
-
 #include "graphics/Graphics.h"
-
+#include "graphics/VideoBuffer.h"
 #include "gui/interface/Label.h"
 #include "gui/interface/Textbox.h"
 #include "gui/interface/Button.h"
@@ -10,13 +9,11 @@
 #include "gui/dialogues/SaveIDMessage.h"
 #include "gui/dialogues/ConfirmPrompt.h"
 #include "gui/dialogues/InformationMessage.h"
-
 #include "client/Client.h"
 #include "client/ThumbnailRendererTask.h"
 #include "client/GameSave.h"
-
+#include "client/http/UploadSaveRequest.h"
 #include "tasks/Task.h"
-
 #include "gui/Style.h"
 
 class SaveUploadTask: public Task
@@ -36,7 +33,19 @@ class SaveUploadTask: public Task
 	bool doWork() override
 	{
 		notifyProgress(-1);
-		return Client::Ref().UploadSave(save) == RequestOkay;
+		auto uploadSaveRequest = std::make_unique<http::UploadSaveRequest>(save);
+		uploadSaveRequest->Start();
+		uploadSaveRequest->Wait();
+		try
+		{
+			save.SetID(uploadSaveRequest->Finish());
+		}
+		catch (const http::RequestError &ex)
+		{
+			notifyError(ByteString(ex.what()).FromUtf8());
+			return false;
+		}
+		return true;
 	}
 
 public:
@@ -52,7 +61,7 @@ ServerSaveActivity::ServerSaveActivity(std::unique_ptr<SaveInfo> newSave, OnUplo
 	thumbnailRenderer(nullptr),
 	save(std::move(newSave)),
 	onUploaded(onUploaded_),
-	saveUploadTask(NULL)
+	saveUploadTask(nullptr)
 {
 	titleLabel = new ui::Label(ui::Point(4, 5), ui::Point((Size.X/2)-8, 16), "");
 	titleLabel->SetTextColour(style::Colour::InformationTitle);
@@ -71,6 +80,7 @@ ServerSaveActivity::ServerSaveActivity(std::unique_ptr<SaveInfo> newSave, OnUplo
 	nameField->Appearance.VerticalAlign = ui::Appearance::AlignMiddle;
 	nameField->Appearance.HorizontalAlign = ui::Appearance::AlignLeft;
 	nameField->SetActionCallback({ [this] { CheckName(nameField->GetText()); } });
+	nameField->SetLimit(50);
 	AddComponent(nameField);
 	FocusComponent(nameField);
 
@@ -82,7 +92,8 @@ ServerSaveActivity::ServerSaveActivity(std::unique_ptr<SaveInfo> newSave, OnUplo
 	AddComponent(descriptionField);
 
 	publishedCheckbox = new ui::Checkbox(ui::Point(8, 45), ui::Point((Size.X/2)-80, 16), "Publish", "");
-	if(Client::Ref().GetAuthUser().Username != save->GetUserName())
+	auto user = Client::Ref().GetAuthUser();
+	if (!(user && user->Username == save->GetUserName()))
 	{
 		//Save is not owned by the user, disable by default
 		publishedCheckbox->SetChecked(false);
@@ -138,7 +149,7 @@ ServerSaveActivity::ServerSaveActivity(std::unique_ptr<SaveInfo> newSave, OnUplo
 
 	if (save->GetGameSave())
 	{
-		thumbnailRenderer = new ThumbnailRendererTask(*save->GetGameSave(), Size / 2 - Vec2(16, 16), false, true);
+		thumbnailRenderer = new ThumbnailRendererTask(*save->GetGameSave(), Size / 2 - Vec2(16, 16), RendererSettings::decorationAntiClickbait, true);
 		thumbnailRenderer->Start();
 	}
 }
@@ -148,7 +159,7 @@ ServerSaveActivity::ServerSaveActivity(std::unique_ptr<SaveInfo> newSave, bool s
 	thumbnailRenderer(nullptr),
 	save(std::move(newSave)),
 	onUploaded(onUploaded_),
-	saveUploadTask(NULL)
+	saveUploadTask(nullptr)
 {
 	ui::Label * titleLabel = new ui::Label(ui::Point(0, 0), Size, "Saving to server...");
 	titleLabel->SetTextColour(style::Colour::InformationTitle);
@@ -168,7 +179,7 @@ void ServerSaveActivity::NotifyDone(Task * task)
 	if(!task->GetSuccess())
 	{
 		Exit();
-		new ErrorMessage("Error", Client::Ref().GetLastError());
+		new ErrorMessage("Error", task->GetError());
 	}
 	else
 	{
@@ -182,38 +193,36 @@ void ServerSaveActivity::NotifyDone(Task * task)
 
 void ServerSaveActivity::Save()
 {
-	if(nameField->GetText().length())
+	if (!nameField->GetText().length())
 	{
-		if(Client::Ref().GetAuthUser().Username != save->GetUserName() && publishedCheckbox->GetChecked())
-		{
-			new ConfirmPrompt("Publish", "This save was created by " + save->GetUserName().FromUtf8() + ", you're about to publish this under your own name; If you haven't been given permission by the author to do so, please uncheck the publish box, otherwise continue", { [this] {
-				Exit();
-				saveUpload();
-			} });
-		}
-		else
-		{
-			Exit();
+		new ErrorMessage("Error", "You must specify a save name.");
+		return;
+	}
+	auto user = Client::Ref().GetAuthUser();
+	if (!(user && user->Username == save->GetUserName()) && publishedCheckbox->GetChecked())
+	{
+		new ConfirmPrompt("Publish", "This save was created by " + save->GetUserName().FromUtf8() + ", you're about to publish this under your own name; If you haven't been given permission by the author to do so, please uncheck the publish box, otherwise continue", { [this] {
 			saveUpload();
-		}
+		} });
 	}
 	else
 	{
-		new ErrorMessage("Error", "You must specify a save name.");
+		saveUpload();
 	}
 }
 
 void ServerSaveActivity::AddAuthorInfo()
 {
-	Json::Value serverSaveInfo;
+	Bson serverSaveInfo;
 	serverSaveInfo["type"] = "save";
 	serverSaveInfo["id"] = save->GetID();
-	serverSaveInfo["username"] = Client::Ref().GetAuthUser().Username;
+	auto user = Client::Ref().GetAuthUser();
+	serverSaveInfo["username"] = user ? user->Username : ByteString("");
 	serverSaveInfo["title"] = save->GetName().ToUtf8();
 	serverSaveInfo["description"] = save->GetDescription().ToUtf8();
 	serverSaveInfo["published"] = (int)save->GetPublished();
-	serverSaveInfo["date"] = (Json::Value::UInt64)time(NULL);
-	Client::Ref().SaveAuthorInfo(&serverSaveInfo);
+	serverSaveInfo["date"] = int64_t(time(nullptr));
+	Client::Ref().SaveAuthorInfo(serverSaveInfo);
 	{
 		auto gameSave = save->TakeGameSave();
 		gameSave->authors = serverSaveInfo;
@@ -223,10 +232,12 @@ void ServerSaveActivity::AddAuthorInfo()
 
 void ServerSaveActivity::saveUpload()
 {
+	okayButton->Enabled = false;
 	save->SetName(nameField->GetText());
 	save->SetDescription(descriptionField->GetText());
 	save->SetPublished(publishedCheckbox->GetChecked());
-	save->SetUserName(Client::Ref().GetAuthUser().Username);
+	auto user = Client::Ref().GetAuthUser();
+	save->SetUserName(user ? user->Username : ByteString(""));
 	save->SetID(0);
 	{
 		auto gameSave = save->TakeGameSave();
@@ -234,16 +245,8 @@ void ServerSaveActivity::saveUpload()
 		save->SetGameSave(std::move(gameSave));
 	}
 	AddAuthorInfo();
-
-	if(Client::Ref().UploadSave(*save) != RequestOkay)
-	{
-		new ErrorMessage("Error", "Upload failed with error:\n"+Client::Ref().GetLastError());
-	}
-	else if (onUploaded)
-	{
-		new SaveIDMessage(save->GetID());
-		onUploaded(std::move(save));
-	}
+	uploadSaveRequest = std::make_unique<http::UploadSaveRequest>(*save);
+	uploadSaveRequest->Start();
 }
 
 void ServerSaveActivity::Exit()
@@ -289,7 +292,7 @@ void ServerSaveActivity::ShowRules()
 		"\bt5. Do not advertise third-party games, sites, or other places not related to The Powder Toy.\bw\n"
 		   "- Mainly this rule is intended to prevent people going through and advertising their own games and products.\n"
 		   "- Unauthorized or unofficial community gathering places, such as Discord, are prohibited.\n"
-		"\bt6. Trolling is not allowed.\bw As with some rules, there's no clear definition. Users who repeatedly troll are far more likely to be banned and recieve longer bans than others.\n"
+		"\bt6. Trolling is not allowed.\bw As with some rules, there's no clear definition. Users who repeatedly troll are far more likely to be banned and receive longer bans than others.\n"
 		"\bt7. Do not impersonate anyone.\bw Registering accounts with names intentionally similar to other users in our community or other online communities is prohibited.\n"
 		"\bt8. Do not post about moderator decisions or issues.\bw If there is a problem regarding a ban on your account or content removal, please contact a moderator through the messages system. Otherwise, discussion about moderator actions should be avoided.\n"
 		"\bt9. Avoid backseat moderating.\bw Moderators are the ones who make the decisions. Users should refrain from threatening bans or possible results from breaking a rule. If there is a possible issue or you are unsure, we recommend reporting the issue through the 'Report' button or via the messaging system on the website.\n"
@@ -346,13 +349,14 @@ void ServerSaveActivity::ShowRules()
 
 void ServerSaveActivity::CheckName(String newname)
 {
-	if (newname.length() && newname == save->GetName() && save->GetUserName() == Client::Ref().GetAuthUser().Username)
+	auto user = Client::Ref().GetAuthUser();
+	if (newname.length() && newname == save->GetName() && user && save->GetUserName() == user->Username)
 		titleLabel->SetText("Modify simulation properties:");
 	else
 		titleLabel->SetText("Upload new simulation:");
 }
 
-void ServerSaveActivity::OnTick(float dt)
+void ServerSaveActivity::OnTick()
 {
 	if (thumbnailRenderer)
 	{
@@ -362,6 +366,26 @@ void ServerSaveActivity::OnTick(float dt)
 			thumbnail = thumbnailRenderer->Finish();
 			thumbnailRenderer = nullptr;
 		}
+	}
+
+	if (uploadSaveRequest && uploadSaveRequest->CheckDone())
+	{
+		okayButton->Enabled = true;
+		try
+		{
+			save->SetID(uploadSaveRequest->Finish());
+			Exit();
+			new SaveIDMessage(save->GetID());
+			if (onUploaded)
+			{
+				onUploaded(std::move(save));
+			}
+		}
+		catch (const http::RequestError &ex)
+		{
+			new ErrorMessage("Error", "Upload failed with error:\n" + ByteString(ex.what()).FromUtf8());
+		}
+		uploadSaveRequest.reset();
 	}
 
 	if(saveUploadTask)

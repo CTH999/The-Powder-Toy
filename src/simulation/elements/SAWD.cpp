@@ -22,7 +22,7 @@ void Element::Element_SAWD()
 	Flammable = 10;
 	Explosive = 0;
 	Meltable = 0;
-	Hardness = 30;
+       	Hardness = 29;
 
 	Weight = 18;
 
@@ -40,5 +40,5 @@ void Element::Element_SAWD()
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
 
-	Graphics = NULL; // is this needed?
+	Graphics = nullptr; // is this needed?
 }

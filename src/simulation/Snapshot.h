@@ -3,9 +3,10 @@
 #include "Sign.h"
 #include "Stickman.h"
 #include "common/tpt-rand.h"
+#include "common/Bson.h"
 #include <vector>
 #include <array>
-#include <json/json.h>
+#include <cstdint>
 
 class Snapshot
 {
@@ -17,10 +18,10 @@ public:
 
 	std::vector<Particle> Particles;
 
-	std::vector<float> GravVelocityX;
-	std::vector<float> GravVelocityY;
-	std::vector<float> GravValue;
-	std::vector<float> GravMap;
+	std::vector<float> GravForceX;
+	std::vector<float> GravForceY;
+	std::vector<float> GravMass;
+	std::vector<uint32_t> GravMask;
 
 	std::vector<unsigned char> BlockMap;
 	std::vector<unsigned char> ElecMap;
@@ -41,7 +42,7 @@ public:
 
 	uint32_t Hash() const;
 
-	Json::Value Authors;
+	Bson Authors;
 
 	virtual ~Snapshot() = default;
 };

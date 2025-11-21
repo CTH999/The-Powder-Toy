@@ -27,7 +27,7 @@ void Element::Element_METL()
 	Weight = 100;
 
 	HeatConduct = 251;
-	Description = "The basic conductor. Meltable.";
+	Description = "Metal, the basic conductor. Meltable.";
 
 	Properties = TYPE_SOLID|PROP_CONDUCTS|PROP_LIFE_DEC|PROP_HOT_GLOW;
 

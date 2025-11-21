@@ -33,6 +33,7 @@ void Element::Element_ICEI()
 	Description = "Crushes under pressure. Cools down air.";
 
 	Properties = TYPE_SOLID|PROP_LIFE_DEC|PROP_NEUTPASS;
+	CarriesTypeIn = 1U << FIELD_CTYPE;
 
 	LowPressure = IPL;
 	LowPressureTransition = NT;
@@ -50,21 +51,24 @@ void Element::Element_ICEI()
 
 static int update(UPDATE_FUNC_ARGS)
 {
-	int r, rx, ry;
+	auto &sd = SimulationData::CRef();
+	auto &elements = sd.elements;
 	if (parts[i].ctype==PT_FRZW)//get colder if it is from FRZW
 	{
 		parts[i].temp = restrict_flt(parts[i].temp-1.0f, MIN_TEMP, MAX_TEMP);
 	}
-	for (rx=-1; rx<2; rx++)
-		for (ry=-1; ry<2; ry++)
-			if (BOUNDS_CHECK && (rx || ry))
+	for (auto rx = -1; rx <= 1; rx++)
+	{
+		for (auto ry = -1; ry <= 1; ry++)
+		{
+			if (rx || ry)
 			{
-				r = pmap[y+ry][x+rx];
+				auto r = pmap[y+ry][x+rx];
 				if (!r)
 					continue;
 				if (TYP(r)==PT_SALT || TYP(r)==PT_SLTW)
 				{
-					if (parts[i].temp > sim->elements[PT_SLTW].LowTemperature && sim->rng.chance(1, 200))
+					if (parts[i].temp > elements[PT_SLTW].LowTemperature && sim->rng.chance(1, 200))
 					{
 						sim->part_change_type(i,x,y,PT_SLTW);
 						sim->part_change_type(ID(r),x+rx,y+ry,PT_SLTW);
@@ -77,5 +81,7 @@ static int update(UPDATE_FUNC_ARGS)
 					parts[ID(r)].ctype = PT_FRZW;
 				}
 			}
+		}
+	}
 	return 0;
 }

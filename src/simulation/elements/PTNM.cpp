@@ -54,7 +54,7 @@ static void wtrv_reactions(int wtrv1_id, UPDATE_FUNC_ARGS)
 	{
 		for (int ry = -1; ry <= 1; ry++)
 		{
-			if (BOUNDS_CHECK && (rx || ry))
+			if (rx || ry)
 			{
 				int r = pmap[y + ry][x + rx];
 				if (!r || ID(r) == wtrv1_id)
@@ -79,7 +79,7 @@ static void hygn_reactions(int hygn1_id, UPDATE_FUNC_ARGS)
 	{
 		for (int ry = -1; ry <= 1; ry++)
 		{
-			if (BOUNDS_CHECK && (rx || ry))
+			if (rx || ry)
 			{
 				int r = pmap[y + ry][x + rx];
 				if (!r || ID(r) == hygn1_id)
@@ -167,7 +167,7 @@ static int update(UPDATE_FUNC_ARGS)
 	{
 		for (int ry = -1; ry <= 1; ry++)
 		{
-			if (BOUNDS_CHECK && (rx || ry))
+			if (rx || ry)
 			{
 				int r = pmap[y + ry][x + rx];
 				if (!r)
@@ -235,6 +235,10 @@ static int update(UPDATE_FUNC_ARGS)
 
 					case PT_SMKE: // SMKE -> CO2
 						sim->part_change_type(ID(r), x + rx, y + ry, PT_CO2);
+						break;
+
+					case PT_RSST: // RSST -> BIZR
+						sim->create_part(ID(r), x + rx, y + ry, PT_BIZR);
 						break;
 					}
 				}

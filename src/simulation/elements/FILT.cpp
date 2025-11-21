@@ -1,9 +1,8 @@
 #include "simulation/ElementCommon.h"
+#include "FILT.h"
 
 static int graphics(GRAPHICS_FUNC_ARGS);
 static void create(ELEMENT_CREATE_FUNC_ARGS);
-int Element_FILT_interactWavelengths(Simulation *sim, Particle* cpart, int origWl);
-int Element_FILT_getWavelengths(Particle* cpart);
 
 void Element::Element_FILT()
 {
@@ -32,9 +31,9 @@ void Element::Element_FILT()
 	Weight = 100;
 
 	HeatConduct = 251;
-	Description = "Filter for photons, changes the color.";
+	Description = "Filter. Changes color of PHOT and BIZR. Color depends on temperature.";
 
-	Properties = TYPE_SOLID | PROP_NOAMBHEAT | PROP_LIFE_DEC;
+	Properties = TYPE_SOLID | PROP_PHOTPASS | PROP_NOAMBHEAT | PROP_LIFE_DEC;
 
 	LowPressure = IPL;
 	LowPressureTransition = NT;
@@ -135,7 +134,7 @@ int Element_FILT_interactWavelengths(Simulation *sim, Particle* cpart, int origW
 	}
 }
 
-int Element_FILT_getWavelengths(Particle* cpart)
+int Element_FILT_getWavelengths(const Particle* cpart)
 {
 	if (cpart->ctype&0x3FFFFFFF)
 	{

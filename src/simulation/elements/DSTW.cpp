@@ -32,7 +32,7 @@ void Element::Element_DSTW()
 	HeatConduct = 23;
 	Description = "Distilled water, does not conduct electricity.";
 
-	Properties = TYPE_LIQUID|PROP_NEUTPASS;
+	Properties = TYPE_LIQUID | PROP_NEUTPASS | PROP_PHOTPASS;
 
 	LowPressure = IPL;
 	LowPressureTransition = NT;
@@ -48,12 +48,13 @@ void Element::Element_DSTW()
 
 static int update(UPDATE_FUNC_ARGS)
 {
-	int r, rx, ry;
-	for (rx=-1; rx<2; rx++)
-		for (ry=-1; ry<2; ry++)
-			if (BOUNDS_CHECK && (rx || ry))
+	for (auto rx = -1; rx <= 1; rx++)
+	{
+		for (auto ry = -1; ry <= 1; ry++)
+		{
+			if (rx || ry)
 			{
-				r = pmap[y+ry][x+rx];
+				auto r = pmap[y+ry][x+rx];
 				switch (TYP(r))
 				{
 				case PT_SALT:
@@ -93,9 +94,23 @@ static int update(UPDATE_FUNC_ARGS)
 						return 1;
 					}
 					break;
+				case PT_SMKE: //DSTW + SMKE = BASE
+					if (parts[ID(r)].temp > (40 + 273.15f) && parts[ID(r)].temp < (60 + 273.15f) &&
+						parts[i].temp > (40 + 273.15f) && parts[i].temp < (60 + 273.15f))
+					{
+						if (sim->rng.chance(1, 100))
+						{
+							sim->part_change_type(i,x,y,PT_BASE);
+							parts[i].life = 1;
+							sim->kill_part(ID(r));
+						}
+					}
+					break;
 				default:
 					continue;
 				}
 			}
+		}
+	}
 	return 0;
 }

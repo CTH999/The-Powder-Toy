@@ -7,12 +7,14 @@
 #include "client/GameSave.h"
 #include "client/SaveFile.h"
 #include "gui/dialogues/ConfirmPrompt.h"
+#include "gui/dialogues/TextPrompt.h"
+#include "gui/dialogues/ErrorMessage.h"
 #include "tasks/TaskWindow.h"
 #include "tasks/Task.h"
 
 #include "Controller.h"
 
-#include "common/tpt-minmax.h"
+#include <algorithm>
 
 LocalBrowserController::LocalBrowserController(std::function<void ()> onDone_):
 	HasDone(false)
@@ -24,7 +26,7 @@ LocalBrowserController::LocalBrowserController(std::function<void ()> onDone_):
 
 	onDone = onDone_;
 
-	browserModel->UpdateSavesList(1);
+	browserModel->UpdateSavesList(0);
 }
 
 void LocalBrowserController::OpenSave(int index)
@@ -75,6 +77,23 @@ void LocalBrowserController::removeSelectedC()
 	new TaskWindow("Removing stamps", new RemoveSavesTask(this, selected));
 }
 
+void LocalBrowserController::RenameSelected()
+{
+	ByteString save = browserModel->GetSelected()[0];
+
+	new TextPrompt("Rename stamp", "Enter a new name for the stamp:", "", "[new name]", false, { [this, save](const String &newName) {
+		if (newName.length() == 0)
+		{
+			new ErrorMessage("Error renaming stamp", "You have to specify the filename.");
+			return;
+		}
+
+		Client::Ref().RenameStamp(save, newName.ToUtf8());
+
+		RefreshSavesList();
+	} });
+}
+
 void LocalBrowserController::RescanStamps()
 {
 	browserModel->RescanStamps();
@@ -94,13 +113,13 @@ void LocalBrowserController::ClearSelection()
 
 void LocalBrowserController::SetPage(int page)
 {
-	if (page != browserModel->GetPageNum() && page > 0 && page <= browserModel->GetPageCount())
+	if (page != browserModel->GetPageNum() && page >= 0 && page < browserModel->GetPageCount())
 		browserModel->UpdateSavesList(page);
 }
 
 void LocalBrowserController::SetPageRelative(int offset)
 {
-	int page = std::min(std::max(browserModel->GetPageNum() + offset, 1), browserModel->GetPageCount());
+	int page = std::max(std::min(browserModel->GetPageNum() + offset, browserModel->GetPageCount() - 1), 0);
 	if (page != browserModel->GetPageNum())
 		browserModel->UpdateSavesList(page);
 }
@@ -141,8 +160,8 @@ void LocalBrowserController::Exit()
 
 LocalBrowserController::~LocalBrowserController()
 {
-	browserView->CloseActiveWindow();
 	delete browserModel;
+	browserView->CloseActiveWindow();
 	delete browserView;
 }
 

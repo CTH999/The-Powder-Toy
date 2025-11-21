@@ -1,12 +1,13 @@
 #include "simulation/ElementCommon.h"
+#include "LOLZ.h"
 
 void Element::Element_LOLZ()
 {
 	Identifier = "DEFAULT_PT_LOLZ";
 	Name = "LOLZ";
 	Colour = 0x569212_rgb;
-	MenuVisible = 1;
-	MenuSection = SC_CRACKER2;
+	MenuVisible = 0;
+	MenuSection = SC_SPECIAL;
 	Enabled = 1;
 
 	Advection = 0.0f;
@@ -42,7 +43,7 @@ void Element::Element_LOLZ()
 	HighTemperatureTransition = NT;
 }
 
-int Element_LOLZ_RuleTable[9][9] =
+extern const int Element_LOLZ_RuleTable[9][9] =
 {
 	{0,0,0,0,0,0,0,0,0},
 	{1,0,0,0,0,0,1,0,0},
@@ -54,5 +55,3 @@ int Element_LOLZ_RuleTable[9][9] =
 	{0,1,0,0,0,0,0,1,0},
 	{0,1,0,0,0,0,0,1,0},
 };
-
-int Element_LOLZ_lolz[XRES/9][YRES/9];

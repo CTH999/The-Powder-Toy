@@ -4,25 +4,30 @@
 
 namespace http
 {
-	RequestManager::RequestManager(ByteString newProxy, ByteString newCafile, ByteString newCapath, bool newDisableNetwork) :
-		proxy(newProxy),
-		cafile(newCafile),
-		capath(newCapath),
-		disableNetwork(newDisableNetwork)
+	RequestManager::RequestManager(Config newConfig) : config(newConfig)
 	{
+		auto apiVersion = Version(97, 0);
 		userAgent = ByteString::Build(
-			"PowderToy/", SAVE_VERSION, ".", MINOR_VERSION,
+			"PowderToy/", DISPLAY_VERSION[0], ".", DISPLAY_VERSION[1],
 			" (", IDENT_PLATFORM,
 			"; NO", // Unused, used to be SSE level.
 			"; M", MOD_ID,
+			"; P", PACKAGE_MODE,
 			"; ", IDENT,
-			") TPTPP/", SAVE_VERSION, ".", MINOR_VERSION, ".", BUILD_NUM, IDENT_RELTYPE, ".", SNAPSHOT_ID
+			") TPTPP/", apiVersion[0], ".", apiVersion[1], ".", APP_VERSION.build, IDENT_RELTYPE, ".", APP_VERSION.build
 		);
 	}
 
 	void RequestManager::RegisterRequest(Request &request)
 	{
-		if (disableNetwork)
+		if (request.handle->failEarly)
+		{
+			request.handle->error = request.handle->failEarly.value();
+			request.handle->statusCode = 600;
+			request.handle->MarkDone();
+			return;
+		}
+		if (config.disableNetwork)
 		{
 			request.handle->statusCode = 604;
 			request.handle->error = "network disabled upon request";

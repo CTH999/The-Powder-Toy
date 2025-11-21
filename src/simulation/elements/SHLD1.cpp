@@ -29,7 +29,7 @@ void Element::Element_SHLD1()
 	Weight = 100;
 
 	HeatConduct = 0;
-	Description = "Shield, spark it to grow.";
+	Description = "Shield. Grows around spark, broken by pressure.";
 
 	Properties = TYPE_SOLID|PROP_LIFE_DEC;
 
@@ -47,12 +47,13 @@ void Element::Element_SHLD1()
 
 static int update(UPDATE_FUNC_ARGS)
 {
-	int r, nnx, nny, rx, ry;
-	for (rx=-1; rx<2; rx++)
-		for (ry=-1; ry<2; ry++)
-			if (BOUNDS_CHECK && (rx || ry))
+	for (auto rx = -1; rx <= 1; rx++)
+	{
+		for (auto ry = -1; ry <= 1; ry++)
+		{
+			if (rx || ry)
 			{
-				r = pmap[y+ry][x+rx];
+				auto r = pmap[y+ry][x+rx];
 				if (!r)
 					continue;
 				else if (TYP(r)==PT_SPRK&&parts[i].life==0)
@@ -62,8 +63,9 @@ static int update(UPDATE_FUNC_ARGS)
 						sim->part_change_type(i,x,y,PT_SHLD2);
 						parts[i].life = 7;
 					}
-					for ( nnx=-1; nnx<2; nnx++)
-						for ( nny=-1; nny<2; nny++)
+					for (auto nnx = -1; nnx <= 1; nnx++)
+					{
+						for (auto nny = -1; nny <= 1; nny++)
 						{
 							if (!pmap[y+ry+nny][x+rx+nnx])
 							{
@@ -71,6 +73,7 @@ static int update(UPDATE_FUNC_ARGS)
 								//parts[ID(pmap[y+ny+nny][x+nx+nnx])].life=7;
 							}
 						}
+					}
 				}
 				else if (TYP(r) == PT_SHLD3 && sim->rng.chance(2, 5))
 				{
@@ -78,5 +81,7 @@ static int update(UPDATE_FUNC_ARGS)
 					parts[i].life = 7;
 				}
 			}
+		}
+	}
 	return 0;
 }

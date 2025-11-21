@@ -5,6 +5,7 @@
 #include "client/ThumbnailRendererTask.h"
 #include "common/platform/Platform.h"
 #include "graphics/Graphics.h"
+#include "graphics/VideoBuffer.h"
 #include "gui/Style.h"
 
 #include "gui/dialogues/ConfirmPrompt.h"
@@ -55,12 +56,12 @@ LocalSaveActivity::LocalSaveActivity(std::unique_ptr<SaveFile> newSave, OnSaved 
 
 	if(save->GetGameSave())
 	{
-		thumbnailRenderer = new ThumbnailRendererTask(*save->GetGameSave(), Size - Vec2(16, 16), true, false);
+		thumbnailRenderer = new ThumbnailRendererTask(*save->GetGameSave(), Size - Vec2(16, 16), RendererSettings::decorationEnabled, false);
 		thumbnailRenderer->Start();
 	}
 }
 
-void LocalSaveActivity::OnTick(float dt)
+void LocalSaveActivity::OnTick()
 {
 	if (thumbnailRenderer)
 	{
@@ -104,19 +105,20 @@ void LocalSaveActivity::Save()
 void LocalSaveActivity::saveWrite(ByteString finalFilename)
 {
 	Platform::MakeDirectory(LOCAL_SAVE_DIR);
-	Json::Value localSaveInfo;
+	Bson localSaveInfo;
 	localSaveInfo["type"] = "localsave";
-	localSaveInfo["username"] = Client::Ref().GetAuthUser().Username;
+	auto user = Client::Ref().GetAuthUser();
+	localSaveInfo["username"] = user ? user->Username : ByteString("");
 	localSaveInfo["title"] = finalFilename;
-	localSaveInfo["date"] = (Json::Value::UInt64)time(NULL);
-	Client::Ref().SaveAuthorInfo(&localSaveInfo);
+	localSaveInfo["date"] = int64_t(time(nullptr));
+	Client::Ref().SaveAuthorInfo(localSaveInfo);
 	{
 		auto gameSave = save->TakeGameSave();
 		gameSave->authors = localSaveInfo;
 		save->SetGameSave(std::move(gameSave));
 	}
-	auto [ fromNewerVersion, saveData ] = save->GetGameSave()->Serialise();
-	(void)fromNewerVersion;
+	std::vector<char> saveData;
+	std::tie(std::ignore, saveData) = save->GetGameSave()->Serialise();
 	if (saveData.size() == 0)
 		new ErrorMessage("Error", "Unable to serialize game data.");
 	else if (!Platform::WriteFile(saveData, finalFilename))

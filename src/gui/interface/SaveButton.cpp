@@ -10,6 +10,7 @@
 
 #include "gui/dialogues/ErrorMessage.h"
 #include "graphics/Graphics.h"
+#include "graphics/VideoBuffer.h"
 
 #include "SimulationConfig.h"
 #include <SDL.h>
@@ -115,7 +116,7 @@ SaveButton::~SaveButton()
 	}
 }
 
-void SaveButton::Tick(float dt)
+void SaveButton::Tick()
 {
 	if (!thumbnail)
 	{
@@ -127,7 +128,7 @@ void SaveButton::Tick(float dt)
 			{
 				if(save->GetGameSave())
 				{
-					thumbnailRenderer = new ThumbnailRendererTask(*save->GetGameSave(), thumbBoxSize, true, true);
+					thumbnailRenderer = new ThumbnailRendererTask(*save->GetGameSave(), thumbBoxSize, RendererSettings::decorationEnabled, true);
 					thumbnailRenderer->Start();
 					triedThumbnail = true;
 				}
@@ -140,7 +141,7 @@ void SaveButton::Tick(float dt)
 			}
 			else if (file && file->GetGameSave())
 			{
-				thumbnailRenderer = new ThumbnailRendererTask(*file->GetGameSave(), thumbBoxSize, true, false);
+				thumbnailRenderer = new ThumbnailRendererTask(*file->GetGameSave(), thumbBoxSize, RendererSettings::decorationEnabled, false);
 				thumbnailRenderer->Start();
 				triedThumbnail = true;
 			}
@@ -148,7 +149,14 @@ void SaveButton::Tick(float dt)
 
 		if (thumbnailRequest && thumbnailRequest->CheckDone())
 		{
-			thumbnail = thumbnailRequest->Finish();
+			try
+			{
+				thumbnail = thumbnailRequest->Finish();
+			}
+			catch (const http::RequestError &ex)
+			{
+				// TODO: handle
+			}
 			thumbnailRequest.reset();
 		}
 
@@ -224,7 +232,7 @@ void SaveButton::Draw(const Point& screenPos)
 			g->BlendText({ x, y }, votesBackground2, 0xC0C0C0_rgb .WithAlpha(255));
 			g->BlendText({ x+3, y }, votesString, 0xFFFFFF_rgb .WithAlpha(255));
 		}
-		if (isMouseInsideHistory && showVotes)
+		if (isMouseInside)
 		{
 			int x = screenPos.X;
 			int y = screenPos.Y-15+(Size.Y-thumbBoxSize.Y)/2+thumbBoxSize.Y;
@@ -255,13 +263,13 @@ void SaveButton::Draw(const Point& screenPos)
 	}
 }
 
-void SaveButton::OnMouseUnclick(int x, int y, unsigned int button)
+void SaveButton::OnMouseClick(int x, int y, unsigned int button)
 {
 	if(button != 1)
 	{
 		return; //left click only!
 	}
-	if (file && !file->GetGameSave())
+	if (file && !file->LazyGetGameSave())
 	{
 		new ErrorMessage("Error loading save", file->GetError());
 		return;
@@ -292,7 +300,7 @@ void SaveButton::AddContextMenu(int menuType)
 	{
 		menu = new ContextMenu(this);
 		menu->AddItem(ContextMenuItem("Open", 0, true));
-		if (Client::Ref().GetAuthUser().UserID)
+		if (Client::Ref().GetAuthUser())
 			menu->AddItem(ContextMenuItem("Select", 1, true));
 		menu->AddItem(ContextMenuItem("View History", 2, true));
 		menu->AddItem(ContextMenuItem("More by this user", 3, true));
@@ -326,36 +334,40 @@ void SaveButton::OnContextMenuAction(int item)
 	}
 }
 
-void SaveButton::OnMouseClick(int x, int y, unsigned int button)
+void SaveButton::OnMouseDown(int x, int y, unsigned int button)
 {
-	if(button == SDL_BUTTON_RIGHT)
+	if (MouseDownInside)
 	{
-		if(menu)
-			menu->Show(GetScreenPos() + ui::Point(x, y));
-	}
-	else
-	{
-		isButtonDown = true;
-		if(button !=1 && selectable)
+		if(button == SDL_BUTTON_RIGHT)
 		{
-			selected = !selected;
-			DoSelection();
+			if(menu)
+				menu->Show(GetContainerPos() + ui::Point(x, y));
 		}
+		else
+		{
+			isButtonDown = true;
+			if(button !=1 && selectable)
+			{
+				selected = !selected;
+				DoSelection();
+			}
 
+		}
 	}
 }
 
-void SaveButton::OnMouseMovedInside(int x, int y, int dx, int dy)
+void SaveButton::OnMouseMoved(int x, int y)
 {
-	if(y > Size.Y-11)
-		isMouseInsideAuthor = true;
-	else
-		isMouseInsideAuthor = false;
+	isMouseInsideAuthor = false;
+	isMouseInsideHistory = false;
+	if (MouseInside)
+	{
+		if (y > Size.Y-11)
+			isMouseInsideAuthor = true;
 
-	if(showVotes && y > Size.Y-29 && y < Size.Y - 18 && x > 0 && x < 9)
-		isMouseInsideHistory = true;
-	else
-		isMouseInsideHistory = false;
+		if (y > Size.Y-29 && y < Size.Y - 18 && x > 0 && x < 9)
+			isMouseInsideHistory = true;
+	}
 }
 
 void SaveButton::OnMouseEnter(int x, int y)

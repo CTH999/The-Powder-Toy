@@ -25,13 +25,13 @@ void Element::Element_GEL()
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 0;
-	Hardness = 20;
+	Hardness = 19;
 
 	Weight = 35;
 
 	DefaultProperties.temp = R_TEMP - 2.0f + 273.15f;
 	HeatConduct = 29;
-	Description = "Gel. A liquid with variable viscosity and heat conductivity.";
+	Description = "A liquid with variable viscosity and heat conductivity. Absorbs water.";
 
 	Properties = TYPE_LIQUID|PROP_LIFE_DEC|PROP_NEUTPENETRATE;
 
@@ -50,22 +50,24 @@ void Element::Element_GEL()
 
 static int update(UPDATE_FUNC_ARGS)
 {
-	int r, rx, ry, rt;
-	bool gel;
+	auto &sd = SimulationData::CRef();
+	auto &elements = sd.elements;
 	if (parts[i].tmp > 100)
 		parts[i].tmp = 100;
 	if (parts[i].tmp < 0)
 		parts[i].tmp = 0;
 	int absorbChanceDenom = parts[i].tmp * 10 + 500;
-	for (rx=-2; rx<3; rx++)
-		for (ry=-2; ry<3; ry++)
-			if (BOUNDS_CHECK && (rx || ry))
+	for (auto rx = -2; rx <= 2; rx++)
+	{
+		for (auto ry = -2; ry <= 2; ry++)
+		{
+			if (rx || ry)
 			{
-				gel=false;
-				r = pmap[y+ry][x+rx];
+				auto gel=false;
+				auto r = pmap[y+ry][x+rx];
 				if (!r)
 					continue;
-				rt = TYP(r);
+				auto rt = TYP(r);
 				//Desaturation
 				switch (rt)
 				{
@@ -125,6 +127,15 @@ static int update(UPDATE_FUNC_ARGS)
 					}
 					gel = true;
 					break;
+				case PT_BASE:
+					// Base absorbs water from gel
+					if (parts[i].tmp > 0 && parts[ID(r)].life > 1)
+					{
+						// BASE <- GEL
+						parts[ID(r)].life--;
+						parts[i].tmp--;
+					}
+					break;
 				default:
 					break;
 				}
@@ -133,23 +144,25 @@ static int update(UPDATE_FUNC_ARGS)
 				dy = parts[i].y - parts[ID(r)].y;
 
 				//Stickiness
-				if ((dx*dx + dy*dy)>1.5 && (gel || !sim->elements[rt].Falldown || (fabs((float)rx)<2 && fabs((float)ry)<2)))
+				if ((dx*dx + dy*dy)>1.5 && (gel || !elements[rt].Falldown || (fabs((float)rx)<2 && fabs((float)ry)<2)))
 				{
 					float per, nd;
 					nd = dx*dx + dy*dy - 0.5;
 					per = 5*(1 - parts[i].tmp/100)*(nd/(dx*dx + dy*dy + nd) - 0.5);
-					if (sim->elements[rt].Properties&TYPE_LIQUID)
+					if (elements[rt].Properties&TYPE_LIQUID)
 						per *= 0.1f;
 					dx *= per; dy *= per;
 					parts[i].vx += dx;
 					parts[i].vy += dy;
-					if ((sim->elements[rt].Properties&TYPE_PART) || rt==PT_GOO)
+					if ((elements[rt].Properties&TYPE_PART) || rt==PT_GOO)
 					{
 						parts[ID(r)].vx -= dx;
 						parts[ID(r)].vy -= dy;
 					}
 				}
 			}
+		}
+	}
 	return 0;
 }
 

@@ -6,7 +6,7 @@ void Element::Element_PSTS()
 	Name = "PSTS";
 	Colour = 0x776677_rgb;
 	MenuVisible = 0;
-	MenuSection = SC_CRACKER;
+	MenuSection = SC_SOLIDS;
 	Enabled = 1;
 
 	Advection = 0.0f;
@@ -22,7 +22,7 @@ void Element::Element_PSTS()
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 0;
-	Hardness = 20;
+	Hardness = 18;
 
 	Weight = 100;
 

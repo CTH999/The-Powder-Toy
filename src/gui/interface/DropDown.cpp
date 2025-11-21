@@ -15,7 +15,8 @@ class DropDownWindow : public ui::Window
 
 public:
 	DropDownWindow(DropDown * dropDown):
-		Window(dropDown->GetScreenPos() + ui::Point(-1, -1 - dropDown->optionIndex * 16), ui::Point(dropDown->Size.X+2, 2+dropDown->options.size()*16)),
+		Window(dropDown->GetScreenPos() + ui::Point(-1, -1 - (dropDown->optionIndex*16 < dropDown->GetScreenPos().Y ? dropDown->optionIndex*16 : 0)),
+						  ui::Point(dropDown->Size.X+2, 2+dropDown->options.size()*16)),
 		dropDown(dropDown),
 		appearance(dropDown->Appearance)
 	{
@@ -157,21 +158,6 @@ void DropDown::AddOption(std::pair<String, int> option)
 			return;
 	}
 	options.push_back(option);
-}
-
-void DropDown::RemoveOption(String option)
-{
-start:
-	for (size_t i = 0; i < options.size(); i++)
-	{
-		if (options[i].first == option)
-		{
-			if ((int)i == optionIndex)
-				optionIndex = -1;
-			options.erase(options.begin()+i);
-			goto start;
-		}
-	}
 }
 
 void DropDown::SetOptions(std::vector<std::pair<String, int> > options)

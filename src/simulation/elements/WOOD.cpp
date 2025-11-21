@@ -1,5 +1,5 @@
-#include "common/tpt-minmax.h"
 #include "simulation/ElementCommon.h"
+#include <algorithm>
 
 static int update(UPDATE_FUNC_ARGS);
 static int graphics(GRAPHICS_FUNC_ARGS);
@@ -26,7 +26,7 @@ void Element::Element_WOOD()
 	Flammable = 20;
 	Explosive = 0;
 	Meltable = 0;
-	Hardness = 15;
+	Hardness = 16;
 
 	Weight = 100;
 

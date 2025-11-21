@@ -41,41 +41,34 @@ int main(int argc, char * argv[])
 	});
 	explicitSingletons = std::make_unique<ExplicitSingletons>();
 	
-	scale = 1;
+	WindowFrameOps windowFrameOps;
 	if (argc >= 3)
 	{
 		std::istringstream ss(argv[2]);
 		int buf;
 		if (ss >> buf)
 		{
-			scale = buf;
+			windowFrameOps.scale = buf;
 		}
 	}
-	resizable = false;
-	fullscreen = false;
-	altFullscreen = false;
-	forceIntegerScaling = true;
 
 	// TODO: maybe bind the maximum allowed scale to screen size somehow
-	if(scale < 1 || scale > 10)
-		scale = 1;
+	if (windowFrameOps.scale < 1 || windowFrameOps.scale > 10)
+	{
+		windowFrameOps.scale = 1;
+	}
 
 	explicitSingletons->engine = std::make_unique<ui::Engine>();
 
+	auto &engine = ui::Engine::Ref();
+	engine.g = new Graphics();
+	engine.windowFrameOps = windowFrameOps;
+
 	SDLOpen();
 
-	StopTextInput();
-
-	ui::Engine::Ref().g = new Graphics();
-	ui::Engine::Ref().Scale = scale;
-	ui::Engine::Ref().SetResizable(resizable);
-	ui::Engine::Ref().Fullscreen = fullscreen;
-	ui::Engine::Ref().SetAltFullscreen(altFullscreen);
-	ui::Engine::Ref().SetForceIntegerScaling(forceIntegerScaling);
-
-	auto &engine = ui::Engine::Ref();
 	engine.Begin();
 	engine.SetFastQuit(true);
+	engine.SetGlobalQuit(true);
 
 	if (argc >= 2)
 	{
@@ -83,11 +76,18 @@ int main(int argc, char * argv[])
 	}
 	else
 	{
-		std::cerr << "path to font.cpp not supplied" << std::endl;
+		std::cerr << "path to font.bz2 not supplied" << std::endl;
 		Platform::Exit(1);
 	}
 
-	EngineProcess();
+	while (engine.Running())
+	{
+		auto delay = EngineProcess();
+		if (delay.has_value())
+		{
+			SDL_Delay(std::max(*delay, UINT64_C(1)));
+		}
+	}
 	Platform::Exit(0);
 	return 0;
 }

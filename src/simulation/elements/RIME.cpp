@@ -24,7 +24,7 @@ void Element::Element_RIME()
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 0;
-	Hardness = 30;
+	Hardness = 32;
 
 	Weight = 100;
 
@@ -41,19 +41,20 @@ void Element::Element_RIME()
 	LowTemperature = ITL;
 	LowTemperatureTransition = NT;
 	HighTemperature = 273.15f;
-	HighTemperatureTransition = PT_WATR;
+	HighTemperatureTransition = ST;
 
 	Update = &update;
 }
 
 static int update(UPDATE_FUNC_ARGS)
 {
-	int r, rx, ry;
-	for (rx=-1; rx<2; rx++)
-		for (ry=-1; ry<2; ry++)
-			if (BOUNDS_CHECK && (rx || ry))
+	for (auto rx = -1; rx <= 1; rx++)
+	{
+		for (auto ry = -1; ry <= 1; ry++)
+		{
+			if (rx || ry)
 			{
-				r = pmap[y+ry][x+rx];
+				auto r = pmap[y+ry][x+rx];
 				if (!r)
 					continue;
 				if (TYP(r)==PT_SPRK)
@@ -61,11 +62,18 @@ static int update(UPDATE_FUNC_ARGS)
 					sim->part_change_type(i,x,y,PT_FOG);
 					parts[i].life = sim->rng.between(60, 119);
 				}
+				else if (TYP(r) == PT_GAS && parts[i].tmp < 10)
+				{
+					sim->kill_part(ID(r));
+					parts[i].tmp++;
+				}
 				else if (TYP(r)==PT_FOG&&parts[ID(r)].life>0)
 				{
 					sim->part_change_type(i,x,y,PT_FOG);
 					parts[i].life = parts[ID(r)].life;
 				}
 			}
+		}
+	}
 	return 0;
 }
