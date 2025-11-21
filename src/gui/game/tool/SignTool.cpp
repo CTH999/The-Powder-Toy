@@ -1,5 +1,7 @@
-#include "SignTool.h"
+#include "Tool.h"
+
 #include "simulation/Simulation.h"
+
 #include "gui/Style.h"
 #include "gui/interface/Window.h"
 #include "gui/interface/Button.h"
@@ -7,6 +9,7 @@
 #include "gui/interface/Textbox.h"
 #include "gui/interface/DropDown.h"
 #include "gui/game/GameModel.h"
+
 #include "graphics/Graphics.h"
 
 class SignWindow: public ui::Window
@@ -47,12 +50,77 @@ public:
 	}
 	virtual ~SignWindow() {}
 	void OnTryExit(ui::Window::ExitMethod method) override;
+	class OkayAction: public ui::ButtonAction
+	{
+	public:
+		SignWindow * prompt;
+		OkayAction(SignWindow * prompt_) { prompt = prompt_; }
+		void ActionCallback(ui::Button * sender) override
+		{
+			prompt->CloseActiveWindow();
+			if(prompt->signID==-1 && prompt->textField->GetText().length())
+			{
+				prompt->sim->signs.push_back(sign(prompt->textField->GetText(), prompt->signPosition.X, prompt->signPosition.Y, (sign::Justification)prompt->justification->GetOption().second));
+			}
+			else if(prompt->signID!=-1 && prompt->textField->GetText().length())
+			{
+				prompt->sim->signs[prompt->signID] = sign(sign(prompt->textField->GetText(), prompt->signPosition.X, prompt->signPosition.Y, (sign::Justification)prompt->justification->GetOption().second));
+			}
+			prompt->SelfDestruct();
+		}
+	};
+	class DeleteAction: public ui::ButtonAction
+	{
+	public:
+		SignWindow * prompt;
+		DeleteAction(SignWindow * prompt_) { prompt = prompt_; }
+		void ActionCallback(ui::Button * sender) override
+		{
+			prompt->CloseActiveWindow();
+			if(prompt->signID!=-1)
+			{
+				prompt->sim->signs.erase(prompt->sim->signs.begin()+prompt->signID);
+			}
+			prompt->SelfDestruct();
+		}
+	};
+
+	class SignTextAction: public ui::TextboxAction
+	{
+	public:
+		SignWindow * prompt;
+		SignTextAction(SignWindow * prompt_) { prompt = prompt_; }
+		void TextChangedCallback(ui::Textbox * sender) override
+		{
+			if(prompt->signID!=-1)
+			{
+				prompt->sim->signs[prompt->signID].text = sender->GetText();
+				prompt->sim->signs[prompt->signID].ju = (sign::Justification)prompt->justification->GetOption().second;
+			}
+		}
+	};
+
+	class MoveAction: public ui::ButtonAction
+	{
+	public:
+		SignWindow * prompt;
+		MoveAction(SignWindow * prompt_) { prompt = prompt_; }
+		void ActionCallback(ui::Button * sender) override
+		{
+			if(prompt->signID!=-1)
+			{
+				prompt->movingSign = &prompt->sim->signs[prompt->signID];
+				prompt->sim->signs[prompt->signID].ju = (sign::Justification)prompt->justification->GetOption().second;
+				prompt->signMoving = true;
+			}
+		}
+	};
 };
 
 SignWindow::SignWindow(SignTool * tool_, Simulation * sim_, int signID_, ui::Point position_):
 	ui::Window(ui::Point(-1, -1), ui::Point(250, 87)),
 	tool(tool_),
-	movingSign(nullptr),
+	movingSign(NULL),
 	signMoving(false),
 	sim(sim_),
 	signID(signID_),
@@ -68,18 +136,7 @@ SignWindow::SignWindow(SignTool * tool_, Simulation * sim_, int signID_, ui::Poi
 	okayButton->Appearance.HorizontalAlign = ui::Appearance::AlignLeft;
 	okayButton->Appearance.VerticalAlign = ui::Appearance::AlignMiddle;
 	okayButton->Appearance.BorderInactive = (ui::Colour(200, 200, 200));
-	okayButton->SetActionCallback({ [this] {
-		CloseActiveWindow();
-		if(signID==-1 && textField->GetText().length())
-		{
-			sim->signs.push_back(sign(textField->GetText(), signPosition.X, signPosition.Y, (sign::Justification)justification->GetOption().second));
-		}
-		else if(signID!=-1 && textField->GetText().length())
-		{
-			sim->signs[signID] = sign(sign(textField->GetText(), signPosition.X, signPosition.Y, (sign::Justification)justification->GetOption().second));
-		}
-		SelfDestruct();
-	} });
+	okayButton->SetActionCallback(new OkayAction(this));
 	AddComponent(okayButton);
 	SetOkayButton(okayButton);
 
@@ -88,7 +145,7 @@ SignWindow::SignWindow(SignTool * tool_, Simulation * sim_, int signID_, ui::Poi
 	okayButton->Appearance.VerticalAlign = ui::Appearance::AlignMiddle;
 	AddComponent(tempLabel);
 
-	justification = new ui::DropDown(ui::Point(52, 48), ui::Point(55, 16));
+	justification = new ui::DropDown(ui::Point(52, 48), ui::Point(50, 16));
 	AddComponent(justification);
 	justification->AddOption(std::pair<String, int>(0xE020 + String(" Left"), (int)sign::Left));
 	justification->AddOption(std::pair<String, int>(0xE01E + String(" Middle"), (int)sign::Middle));
@@ -101,13 +158,7 @@ SignWindow::SignWindow(SignTool * tool_, Simulation * sim_, int signID_, ui::Poi
 	textField->Appearance.HorizontalAlign = ui::Appearance::AlignLeft;
 	textField->Appearance.VerticalAlign = ui::Appearance::AlignMiddle;
 	textField->SetLimit(45);
-	textField->SetActionCallback({ [this] {
-		if (signID!=-1)
-		{
-			sim->signs[signID].text = textField->GetText();
-			sim->signs[signID].ju = (sign::Justification)justification->GetOption().second;
-		}
-	} });
+	textField->SetActionCallback(new SignTextAction(this));
 	AddComponent(textField);
 	FocusComponent(textField);
 
@@ -120,27 +171,13 @@ SignWindow::SignWindow(SignTool * tool_, Simulation * sim_, int signID_, ui::Poi
 
 		ui::Point position = ui::Point(justification->Position.X+justification->Size.X+3, 48);
 		ui::Button * moveButton = new ui::Button(position, ui::Point(((Size.X-position.X-8)/2)-2, 16), "Move");
-		moveButton->SetActionCallback({ [this] {
-			if (signID!=-1)
-			{
-				movingSign = &sim->signs[signID];
-				sim->signs[signID].ju = (sign::Justification)justification->GetOption().second;
-				signMoving = true;
-			}
-		} });
+		moveButton->SetActionCallback(new MoveAction(this));
 		AddComponent(moveButton);
 
 		position = ui::Point(justification->Position.X+justification->Size.X+3, 48)+ui::Point(moveButton->Size.X+3, 0);
 		ui::Button * deleteButton = new ui::Button(position, ui::Point((Size.X-position.X-8)-1, 16), "Delete");
 		//deleteButton->SetIcon(IconDelete);
-		deleteButton->SetActionCallback({ [this] {
-			CloseActiveWindow();
-			if (signID!=-1)
-			{
-				sim->signs.erase(sim->signs.begin() + signID);
-			}
-			SelfDestruct();
-		} });
+		deleteButton->SetActionCallback(new DeleteAction(this));
 
 		signPosition.X = sim->signs[signID].x;
 		signPosition.Y = sim->signs[signID].y;
@@ -165,9 +202,9 @@ void SignWindow::DoDraw()
 		Graphics * g = GetGraphics();
 
 		String text = currentSign.getDisplayText(sim, x, y, w, h);
-		g->DrawFilledRect(RectSized(Vec2{ x + 1, y + 1 }, Vec2{ w, h - 1 }), 0x000000_rgb);
-		g->DrawRect(RectSized(Vec2{ x, y }, Vec2{ w+1, h }), 0xC0C0C0_rgb);
-		g->BlendText({ x+3, y+4 }, text, 0xFFFFFF_rgb .WithAlpha(255));
+		g->clearrect(x, y, w+1, h);
+		g->drawrect(x, y, w+1, h, 192, 192, 192, 255);
+		g->drawtext(x+3, y+3, text, 255, 255, 255, 255);
 
 		if (currentSign.ju != sign::None)
 		{
@@ -175,9 +212,10 @@ void SignWindow::DoDraw()
 			y = currentSign.y;
 			dx = 1 - currentSign.ju;
 			dy = (currentSign.y > 18) ? -1 : 1;
+
 			for (int j=0; j<4; j++)
 			{
-				g->DrawPixel({ x, y }, 0xC0C0C0_rgb);
+				g->blendpixel(x, y, 192, 192, 192, 255);
 				x+=dx;
 				y+=dy;
 			}
@@ -194,7 +232,7 @@ void SignWindow::DoMouseMove(int x, int y, int dx, int dy) {
 		ui::Window::DoMouseMove(x, y, dx, dy);
 	else
 	{
-		ui::Point pos = tool->gameModel.AdjustZoomCoords(ui::Point(x, y));
+		ui::Point pos = tool->gameModel->AdjustZoomCoords(ui::Point(x, y));
 		if(pos.X < XRES && pos.Y < YRES)
 		{
 			movingSign->x = pos.X;
@@ -219,23 +257,30 @@ void SignWindow::OnDraw()
 {
 	Graphics * g = GetGraphics();
 
-	g->DrawFilledRect(RectSized(Position - Vec2{ 1, 1 }, Size + Vec2{ 2, 2 }), 0x000000_rgb);
-	g->DrawRect(RectSized(Position, Size), 0xC8C8C8_rgb);
+	g->clearrect(Position.X-2, Position.Y-2, Size.X+3, Size.Y+3);
+	g->drawrect(Position.X, Position.Y, Size.X, Size.Y, 200, 200, 200, 255);
 }
 
-std::unique_ptr<VideoBuffer> SignTool::GetIcon(int toolID, Vec2<int> size)
+VideoBuffer * SignTool::GetIcon(int toolID, int width, int height)
 {
-	auto texture = std::make_unique<VideoBuffer>(size);
-	texture->DrawRect(size.OriginRect(), 0xA0A0A0_rgb);
-	texture->BlendChar((size / 2) - Vec2(5, 5), 0xE021, 0x204080_rgb .WithAlpha(0xFF));
-	texture->BlendChar((size / 2) - Vec2(5, 5), 0xE020, 0xFFFFFF_rgb .WithAlpha(0xFF));
-	return texture;
+	VideoBuffer * newTexture = new VideoBuffer(width, height);
+	for (int y=0; y<height; y++)
+	{
+		for (int x=0; x<width; x++)
+		{
+			pixel pc =  x==0||x==width-1||y==0||y==height-1 ? PIXPACK(0xA0A0A0) : PIXPACK(0x000000);
+			newTexture->SetPixel(x, y, PIXR(pc), PIXG(pc), PIXB(pc), 255);
+		}
+	}
+	newTexture->AddCharacter((width/2)-5, (height/2)-5, 0xE021, 32, 64, 128, 255);
+	newTexture->BlendCharacter((width/2)-5, (height/2)-5, 0xE020, 255, 255, 255, 255);
+	return newTexture;
 }
 
-void SignTool::Click(Simulation * sim, Brush const &brush, ui::Point position)
+void SignTool::Click(Simulation * sim, Brush * brush, ui::Point position)
 {
 	int signX, signY, signW, signH, signIndex = -1;
-	for (int i = 0; i < int(sim->signs.size()); i++)
+	for (size_t i = 0; i < sim->signs.size(); i++)
 	{
 		sim->signs[i].getDisplayText(sim, signX, signY, signW, signH);
 		if (position.X > signX && position.X < signX+signW && position.Y > signY && position.Y < signY+signH)
