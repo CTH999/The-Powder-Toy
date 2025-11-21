@@ -6,7 +6,7 @@ void Element::Element_TSNS()
 {
 	Identifier = "DEFAULT_PT_TSNS";
 	Name = "TSNS";
-	Colour = PIXPACK(0xFD00D5);
+	Colour = 0xFD00D5_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_SENSOR;
 	Enabled = 1;
@@ -51,6 +51,8 @@ void Element::Element_TSNS()
 
 static int update(UPDATE_FUNC_ARGS)
 {
+	auto &sd = SimulationData::CRef();
+	auto &elements = sd.elements;
 	int rd = parts[i].tmp2;
 	if (rd > 25)
 		parts[i].tmp2 = rd = 25;
@@ -58,8 +60,10 @@ static int update(UPDATE_FUNC_ARGS)
 	{
 		parts[i].life = 0;
 		for (int rx = -2; rx <= 2; rx++)
+		{
 			for (int ry = -2; ry <= 2; ry++)
-				if (BOUNDS_CHECK && (rx || ry))
+			{
+				if (rx || ry)
 				{
 					int r = pmap[y+ry][x+rx];
 					if (!r)
@@ -67,9 +71,10 @@ static int update(UPDATE_FUNC_ARGS)
 					if (!r)
 						continue;
 					int rt = TYP(r);
-					if (sim->parts_avg(i, ID(r), PT_INSL) != PT_INSL)
+					auto pavg = sim->parts_avg(i, ID(r), PT_INSL);
+					if (pavg != PT_INSL && pavg != PT_RSSS)
 					{
-						if ((sim->elements[rt].Properties&PROP_CONDUCTS) && !(rt == PT_WATR || rt == PT_SLTW || rt == PT_NTCT || rt == PT_PTCT || rt == PT_INWR) && parts[ID(r)].life == 0)
+						if ((elements[rt].Properties&PROP_CONDUCTS) && !(rt == PT_WATR || rt == PT_SLTW || rt == PT_NTCT || rt == PT_PTCT || rt == PT_INWR) && parts[ID(r)].life == 0)
 						{
 							parts[ID(r)].life = 4;
 							parts[ID(r)].ctype = rt;
@@ -77,6 +82,8 @@ static int update(UPDATE_FUNC_ARGS)
 						}
 					}
 				}
+			}
+		}
 	}
 	bool setFilt = false;
 	int photonWl = 0;
@@ -101,16 +108,17 @@ static int update(UPDATE_FUNC_ARGS)
 			}
 	if (setFilt)
 	{
-		int nx, ny;
 		for (int rx = -1; rx <= 1; rx++)
+		{
 			for (int ry = -1; ry <= 1; ry++)
-				if (BOUNDS_CHECK && (rx || ry))
+			{
+				if (rx || ry)
 				{
 					int r = pmap[y+ry][x+rx];
 					if (!r)
 						continue;
-					nx = x + rx;
-					ny = y + ry;
+					auto nx = x + rx;
+					auto ny = y + ry;
 					while (TYP(r) == PT_FILT)
 					{
 						parts[ID(r)].ctype = 0x10000000 + photonWl;
@@ -121,6 +129,8 @@ static int update(UPDATE_FUNC_ARGS)
 						r = pmap[ny][nx];
 					}
 				}
+			}
+		}
 	}
 	return 0;
 }

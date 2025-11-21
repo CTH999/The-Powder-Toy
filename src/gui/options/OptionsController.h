@@ -1,8 +1,6 @@
-#ifndef OPTIONSCONTROLLER_H_
-#define OPTIONSCONTROLLER_H_
-#include "Config.h"
-
+#pragma once
 #include <functional>
+#include "simulation/SimulationSettings.h"
 
 class GameModel;
 class OptionsModel;
@@ -21,24 +19,34 @@ public:
 	void SetNewtonianGravity(bool state);
 	void SetWaterEqualisation(bool state);
 	void SetGravityMode(int gravityMode);
+	void SetCustomGravityX(float x);
+	void SetCustomGravityY(float y);
 	void SetAirMode(int airMode);
+	void SetAmbientAirTemperature(float ambientAirTemp);
+	void SetVorticityCoeff(float vorticityCoeff);
 	void SetEdgeMode(int edgeMode);
+	void SetTemperatureScale(TempScale temperatureScale);
+	void SetThreadedRendering(bool newThreadedRendering);
 	void SetFullscreen(bool fullscreen);
-	void SetAltFullscreen(bool altFullscreen);
+	void SetChangeResolution(bool newChangeResolution);
 	void SetForceIntegerScaling(bool forceIntegerScaling);
+	void SetBlurryScaling(bool newBlurryScaling);
 	void SetScale(int scale);
+	void SetGraveExitsConsole(bool graveExitsConsole);
+	void SetNativeClipoard(bool nativeClipoard);
 	void SetResizable(bool resizable);
 	void SetFastQuit(bool fastquit);
+	void SetGlobalQuit(bool newGlobalQuit);
 	void SetDecoSpace(int decoSpace);
 	void SetShowAvatars(bool showAvatars);
 	void SetMouseClickrequired(bool mouseClickRequired);
 	void SetIncludePressure(bool includePressure);
 	void SetPerfectCircle(bool perfectCircle);
 	void SetMomentumScroll(bool momentumScroll);
+	void SetRedirectStd(bool newRedirectStd);
+	void SetAutoStartupRequest(bool newAutoStartupRequest);
 	
 	void Exit();
 	OptionsView * GetView();
 	virtual ~OptionsController();
 };
-
-#endif /* OPTIONSCONTROLLER_H_ */
