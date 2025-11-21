@@ -1,15 +1,13 @@
 #include "OptionsModel.h"
-
 #include "OptionsView.h"
-
 #include "simulation/Simulation.h"
 #include "simulation/Air.h"
 #include "simulation/gravity/Gravity.h"
-
 #include "prefs/GlobalPrefs.h"
-
+#include "common/clipboard/Clipboard.h"
 #include "gui/interface/Engine.h"
 #include "gui/game/GameModel.h"
+#include "client/Client.h"
 
 OptionsModel::OptionsModel(GameModel * gModel_) {
 	gModel = gModel_;
@@ -46,15 +44,12 @@ void OptionsModel::SetAmbientHeatSimulation(bool state)
 
 bool OptionsModel::GetNewtonianGravity()
 {
-	return sim->grav->IsEnabled();
+	return bool(sim->grav);
 }
 
 void OptionsModel::SetNewtonianGravity(bool state)
 {
-	if(state)
-		sim->grav->start_grav_async();
-	else
-		sim->grav->stop_grav_async();
+	sim->EnableNewtonianGravity(state);
 	notifySettingsChanged();
 }
 
@@ -90,14 +85,26 @@ void OptionsModel::SetEdgeMode(int edgeMode)
 	notifySettingsChanged();
 }
 
-int OptionsModel::GetTemperatureScale()
+TempScale OptionsModel::GetTemperatureScale()
 {
 	return gModel->GetTemperatureScale();
 }
-void OptionsModel::SetTemperatureScale(int temperatureScale)
+void OptionsModel::SetTemperatureScale(TempScale temperatureScale)
 {
-	GlobalPrefs::Ref().Set("Renderer.TemperatureScale", temperatureScale);
+	GlobalPrefs::Ref().Set("Renderer.TemperatureScale", int(temperatureScale));
 	gModel->SetTemperatureScale(temperatureScale);
+	notifySettingsChanged();
+}
+
+int OptionsModel::GetThreadedRendering()
+{
+	return gModel->GetThreadedRendering();
+}
+
+void OptionsModel::SetThreadedRendering(bool newThreadedRendering)
+{
+	GlobalPrefs::Ref().Set("Renderer.SeparateThread", newThreadedRendering);
+	gModel->SetThreadedRendering(newThreadedRendering);
 	notifySettingsChanged();
 }
 
@@ -109,6 +116,17 @@ void OptionsModel::SetAmbientAirTemperature(float ambientAirTemp)
 {
 	GlobalPrefs::Ref().Set("Simulation.AmbientAirTemp", ambientAirTemp);
 	gModel->SetAmbientAirTemperature(ambientAirTemp);
+	notifySettingsChanged();
+}
+
+float OptionsModel::GetVorticityCoeff()
+{
+	return gModel->GetSimulation()->air->vorticityCoeff;
+}
+void OptionsModel::SetVorticityCoeff(float vorticityCoeff)
+{
+	GlobalPrefs::Ref().Set("Simulation.VorticityCoeff", vorticityCoeff);
+	gModel->SetVorticityCoeff(vorticityCoeff);
 	notifySettingsChanged();
 }
 
@@ -156,6 +174,30 @@ void OptionsModel::SetScale(int scale)
 	notifySettingsChanged();
 }
 
+bool OptionsModel::GetGraveExitsConsole()
+{
+	return ui::Engine::Ref().GraveExitsConsole;
+}
+
+void OptionsModel::SetGraveExitsConsole(bool graveExitsConsole)
+{
+	ui::Engine::Ref().GraveExitsConsole = graveExitsConsole;
+	GlobalPrefs::Ref().Set("GraveExitsConsole", graveExitsConsole);
+	notifySettingsChanged();
+}
+
+bool OptionsModel::GetNativeClipoard()
+{
+	return Clipboard::GetEnabled();
+}
+
+void OptionsModel::SetNativeClipoard(bool nativeClipoard)
+{
+	Clipboard::SetEnabled(nativeClipoard);
+	GlobalPrefs::Ref().Set("NativeClipboard.Enabled", nativeClipoard);
+	notifySettingsChanged();
+}
+
 bool OptionsModel::GetResizable()
 {
 	return ui::Engine::Ref().GetResizable();
@@ -179,15 +221,15 @@ void OptionsModel::SetFullscreen(bool fullscreen)
 	notifySettingsChanged();
 }
 
-bool OptionsModel::GetAltFullscreen()
+bool OptionsModel::GetChangeResolution()
 {
-	return ui::Engine::Ref().GetAltFullscreen();
+	return ui::Engine::Ref().GetChangeResolution();
 }
 
-void OptionsModel::SetAltFullscreen(bool altFullscreen)
+void OptionsModel::SetChangeResolution(bool newChangeResolution)
 {
-	ui::Engine::Ref().SetAltFullscreen(altFullscreen);
-	GlobalPrefs::Ref().Set("AltFullscreen", altFullscreen);
+	ui::Engine::Ref().SetChangeResolution(newChangeResolution);
+	GlobalPrefs::Ref().Set("AltFullscreen", newChangeResolution);
 	notifySettingsChanged();
 }
 
@@ -203,6 +245,18 @@ void OptionsModel::SetForceIntegerScaling(bool forceIntegerScaling)
 	notifySettingsChanged();
 }
 
+bool OptionsModel::GetBlurryScaling()
+{
+	return ui::Engine::Ref().GetBlurryScaling();
+}
+
+void OptionsModel::SetBlurryScaling(bool newBlurryScaling)
+{
+	ui::Engine::Ref().SetBlurryScaling(newBlurryScaling);
+	GlobalPrefs::Ref().Set("BlurryScaling", newBlurryScaling);
+	notifySettingsChanged();
+}
+
 bool OptionsModel::GetFastQuit()
 {
 	return ui::Engine::Ref().GetFastQuit();
@@ -211,6 +265,17 @@ void OptionsModel::SetFastQuit(bool fastquit)
 {
 	ui::Engine::Ref().SetFastQuit(fastquit);
 	GlobalPrefs::Ref().Set("FastQuit", bool(fastquit));
+	notifySettingsChanged();
+}
+
+bool OptionsModel::GetGlobalQuit()
+{
+	return ui::Engine::Ref().GetGlobalQuit();
+}
+void OptionsModel::SetGlobalQuit(bool newGlobalQuit)
+{
+	ui::Engine::Ref().SetGlobalQuit(newGlobalQuit);
+	GlobalPrefs::Ref().Set("GlobalQuit", newGlobalQuit);
 	notifySettingsChanged();
 }
 
@@ -282,6 +347,29 @@ void OptionsModel::SetMomentumScroll(bool state)
 {
 	GlobalPrefs::Ref().Set("MomentumScroll", state);
 	ui::Engine::Ref().MomentumScroll = state;
+	notifySettingsChanged();
+}
+
+bool OptionsModel::GetRedirectStd()
+{
+	return Client::Ref().GetRedirectStd();
+}
+
+void OptionsModel::SetRedirectStd(bool newRedirectStd)
+{
+	GlobalPrefs::Ref().Set("RedirectStd", newRedirectStd);
+	Client::Ref().SetRedirectStd(newRedirectStd);
+	notifySettingsChanged();
+}
+bool OptionsModel::GetAutoStartupRequest()
+{
+	return Client::Ref().GetAutoStartupRequest();
+}
+
+void OptionsModel::SetAutoStartupRequest(bool newAutoStartupRequest)
+{
+	GlobalPrefs::Ref().Set("AutoStartupRequest", newAutoStartupRequest);
+	Client::Ref().SetAutoStartupRequest(newAutoStartupRequest);
 	notifySettingsChanged();
 }
 

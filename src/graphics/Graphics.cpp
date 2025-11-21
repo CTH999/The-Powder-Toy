@@ -36,15 +36,15 @@ void VideoBuffer::Crop(Rect<int> rect)
 	if (rect == Size().OriginRect())
 		return;
 
-	PlaneAdapter<std::vector<pixel> &> newVideo(rect.Size(), video.Base);
+	PlaneAdapter<std::vector<pixel> &> newVideo(rect.size, std::in_place, video.Base);
 	for (auto y = 0; y < newVideo.Size().Y; y++)
 		std::copy_n(
-			video.RowIterator(rect.TopLeft + Vec2(0, y)),
+			video.RowIterator(rect.pos + Vec2(0, y)),
 			newVideo.Size().X,
 			newVideo.RowIterator(Vec2(0, y))
 		);
-	newVideo.Base.resize(newVideo.Size().X * newVideo.Size().Y);
-	newVideo.Base.shrink_to_fit();
+	video.Base.resize(newVideo.Size().X * newVideo.Size().Y);
+	video.Base.shrink_to_fit();
 	video.SetSize(newVideo.Size());
 }
 
@@ -56,7 +56,7 @@ void VideoBuffer::Resize(Vec2<int> size, bool resample)
 	if (resample)
 	{
 		std::array<std::unique_ptr<Resampler>, PIXELCHANNELS> resamplers;
-		Resampler::Contrib_List *clist_x = NULL, *clist_y = NULL;
+		Resampler::Contrib_List *clist_x = nullptr, *clist_y = nullptr;
 		for (auto &ptr : resamplers)
 		{
 			ptr = std::make_unique<Resampler>(
@@ -123,7 +123,7 @@ void VideoBuffer::Resize(Vec2<int> size, bool resample)
 
 void VideoBuffer::Resize(float factor, bool resample)
 {
-	Resize(Vec2<int>(Size() * factor), resample);
+	Resize(Vec2{ int(Size().X * factor), int(Size().Y * factor) }, resample);
 }
 
 void VideoBuffer::ResizeToFit(Vec2<int> bound, bool resample)
@@ -131,15 +131,18 @@ void VideoBuffer::ResizeToFit(Vec2<int> bound, bool resample)
 	Vec2<int> size = Size();
 	if (size.X > bound.X || size.Y > bound.Y)
 	{
+		auto ceilDiv = [](int a, int b) {
+			return a / b + ((a % b) ? 1 : 0);
+		};
 		if (bound.X * size.Y < bound.Y * size.X)
-			size = size * bound.X / size.X;
+			size = { bound.X, ceilDiv(size.Y * bound.X, size.X) };
 		else
-			size = size * bound.Y / size.Y;
+			size = { ceilDiv(size.X * bound.Y, size.Y), bound.Y };
 	}
 	Resize(size, resample);
 }
 
-std::unique_ptr<VideoBuffer> VideoBuffer::FromPNG(std::vector<char> const &data)
+std::unique_ptr<VideoBuffer> VideoBuffer::FromPNG(std::span<const char> data)
 {
 	auto video = format::PixelsFromPNG(data, 0x000000_rgb);
 	if (video)
@@ -162,15 +165,10 @@ std::vector<char> VideoBuffer::ToPPM() const
 	return format::PixelsToPPM(video);
 }
 
-template class RasterDrawMethods<VideoBuffer>;
+template struct RasterDrawMethods<VideoBuffer>;
 
 Graphics::Graphics()
 {}
-
-int Graphics::textwidth(const String &str)
-{
-	return TextSize(str).X;
-}
 
 void Graphics::draw_icon(int x, int y, Icon icon, unsigned char alpha, bool invert)
 {
@@ -179,269 +177,275 @@ void Graphics::draw_icon(int x, int y, Icon icon, unsigned char alpha, bool inve
 	{
 	case IconOpen:
 		if(invert)
-			drawchar(x, y, 0xE001, 0, 0, 0, alpha);
+			BlendChar({ x, y }, 0xE001, 0x000000_rgb .WithAlpha(alpha));
 		else
-			drawchar(x, y, 0xE001, 255, 255, 255, alpha);
+			BlendChar({ x, y }, 0xE001, 0xFFFFFF_rgb .WithAlpha(alpha));
 		break;
 	case IconReload:
 		if(invert)
-			drawchar(x, y, 0xE011, 0, 0, 0, alpha);
+			BlendChar({ x, y }, 0xE011, 0x000000_rgb .WithAlpha(alpha));
 		else
-			drawchar(x, y, 0xE011, 255, 255, 255, alpha);
+			BlendChar({ x, y }, 0xE011, 0xFFFFFF_rgb .WithAlpha(alpha));
 		break;
 	case IconSave:
 		if(invert)
-			drawchar(x, y, 0xE002, 0, 0, 0, alpha);
+			BlendChar({ x, y }, 0xE002, 0x000000_rgb .WithAlpha(alpha));
 		else
-			drawchar(x, y, 0xE002, 255, 255, 255, alpha);
+			BlendChar({ x, y }, 0xE002, 0xFFFFFF_rgb .WithAlpha(alpha));
 		break;
 	case IconVoteUp:
 		if(invert)
 		{
-			drawchar(x-11, y+1, 0xE04B, 0, 100, 0, alpha);
-			drawtext(x+2, y+1, "Vote", 0, 100, 0, alpha);
+			BlendChar({ x-11, y+1 }, 0xE04B, 0x006400_rgb .WithAlpha(alpha));
+			BlendText({ x+2, y+1 }, "Vote", 0x006400_rgb .WithAlpha(alpha));
 		}
 		else
 		{
-			drawchar(x-11, y+1, 0xE04B, 0, 187, 18, alpha);
-			drawtext(x+2, y+1, "Vote", 0, 187, 18, alpha);
+			BlendChar({ x-11, y+1 }, 0xE04B, 0x00BB12_rgb .WithAlpha(alpha));
+			BlendText({ x+2, y+1 }, "Vote", 0x00BB12_rgb .WithAlpha(alpha));
 		}
 		break;
 	case IconVoteDown:
 		if(invert)
-			drawchar(x, y, 0xE04A, 100, 10, 0, alpha);
+			BlendChar({ x, y }, 0xE04A, 0x640A00_rgb .WithAlpha(alpha));
 		else
-			drawchar(x, y, 0xE04A, 187, 40, 0, alpha);
+			BlendChar({ x, y }, 0xE04A, 0xBB2800_rgb .WithAlpha(alpha));
 		break;
 	case IconTag:
 		if(invert)
-			drawchar(x, y, 0xE003, 0, 0, 0, alpha);
+			BlendChar({ x, y }, 0xE003, 0x000000_rgb .WithAlpha(alpha));
 		else
-			drawchar(x, y, 0xE003, 255, 255, 255, alpha);
+			BlendChar({ x, y }, 0xE003, 0xFFFFFF_rgb .WithAlpha(alpha));
 		break;
 	case IconNew:
 		if(invert)
-			drawchar(x, y, 0xE012, 0, 0, 0, alpha);
+			BlendChar({ x, y }, 0xE012, 0x000000_rgb .WithAlpha(alpha));
 		else
-			drawchar(x, y, 0xE012, 255, 255, 255, alpha);
+			BlendChar({ x, y }, 0xE012, 0xFFFFFF_rgb .WithAlpha(alpha));
 		break;
 	case IconLogin:
 		if(invert)
-			drawchar(x, y+1, 0xE004, 0, 0, 0, alpha);
+			BlendChar({ x, y + 1 }, 0xE004, 0x000000_rgb .WithAlpha(alpha));
 		else
-			drawchar(x, y+1, 0xE004, 255, 255, 255, alpha);
+			BlendChar({ x, y + 1 }, 0xE004, 0xFFFFFF_rgb .WithAlpha(alpha));
 		break;
 	case IconSimulationSettings:
 		if(invert)
-			drawchar(x, y+1, 0xE04F, 0, 0, 0, alpha);
+			BlendChar({ x, y + 1 }, 0xE04F, 0x000000_rgb .WithAlpha(alpha));
 		else
-			drawchar(x, y+1, 0xE04F, 255, 255, 255, alpha);
+			BlendChar({ x, y + 1 }, 0xE04F, 0xFFFFFF_rgb .WithAlpha(alpha));
 		break;
 	case IconRenderSettings:
 		if(invert)
 		{
-			drawchar(x, y+1, 0xE058, 255, 0, 0, alpha);
-			drawchar(x, y+1, 0xE059, 0, 255, 0, alpha);
-			drawchar(x, y+1, 0xE05A, 0, 0, 255, alpha);
+			BlendChar({ x, y + 1 }, 0xE058, 0xFF0000_rgb .WithAlpha(alpha));
+			BlendChar({ x, y + 1 }, 0xE059, 0x00FF00_rgb .WithAlpha(alpha));
+			BlendChar({ x, y + 1 }, 0xE05A, 0x0000FF_rgb .WithAlpha(alpha));
 		}
 		else
 		{
-			addchar(x, y+1, 0xE058, 255, 0, 0, alpha);
-			addchar(x, y+1, 0xE059, 0, 255, 0, alpha);
-			addchar(x, y+1, 0xE05A, 0, 0, 255, alpha);
+			AddChar({ x, y + 1 }, 0xE058, 0xFF0000_rgb .WithAlpha(alpha));
+			AddChar({ x, y + 1 }, 0xE059, 0x00FF00_rgb .WithAlpha(alpha));
+			AddChar({ x, y + 1 }, 0xE05A, 0x0000FF_rgb .WithAlpha(alpha));
 		}
 		break;
 	case IconPause:
 		if(invert)
-			drawchar(x, y, 0xE010, 0, 0, 0, alpha);
+			BlendChar({ x, y }, 0xE010, 0x000000_rgb .WithAlpha(alpha));
 		else
-			drawchar(x, y, 0xE010, 255, 255, 255, alpha);
+			BlendChar({ x, y }, 0xE010, 0xFFFFFF_rgb .WithAlpha(alpha));
 		break;
 	case IconFavourite:
 		if(invert)
-			drawchar(x, y, 0xE04C, 100, 80, 32, alpha);
+			BlendChar({ x, y }, 0xE04C, 0x645020_rgb .WithAlpha(alpha));
 		else
-			drawchar(x, y, 0xE04C, 192, 160, 64, alpha);
+			BlendChar({ x, y }, 0xE04C, 0xC0A040_rgb .WithAlpha(alpha));
 		break;
 	case IconReport:
 		if(invert)
-			drawchar(x, y, 0xE063, 140, 140, 0, alpha);
+			BlendChar({ x, y }, 0xE063, 0x8C8C00_rgb .WithAlpha(alpha));
 		else
-			drawchar(x, y, 0xE063, 255, 255, 0, alpha);
+			BlendChar({ x, y }, 0xE063, 0xFFFF00_rgb .WithAlpha(alpha));
 		break;
 	case IconUsername:
 		if(invert)
 		{
-			drawchar(x, y, 0xE00B, 32, 64, 128, alpha);
-			drawchar(x, y, 0xE00A, 0, 0, 0, alpha);
+			BlendChar({ x, y }, 0xE00B, 0x204080_rgb .WithAlpha(alpha));
+			BlendChar({ x, y }, 0xE00A, 0x000000_rgb .WithAlpha(alpha));
 		}
 		else
 		{
-			drawchar(x, y, 0xE00B, 32, 64, 128, alpha);
-			drawchar(x, y, 0xE00A, 255, 255, 255, alpha);
+			BlendChar({ x, y }, 0xE00B, 0x204080_rgb .WithAlpha(alpha));
+			BlendChar({ x, y }, 0xE00A, 0xFFFFFF_rgb .WithAlpha(alpha));
 		}
 		break;
 	case IconPassword:
 		if(invert)
 		{
-			drawchar(x, y, 0xE00C, 160, 144, 32, alpha);
-			drawchar(x, y, 0xE004, 0, 0, 0, alpha);
+			BlendChar({ x, y }, 0xE00C, 0xA09020_rgb .WithAlpha(alpha));
+			BlendChar({ x, y }, 0xE004, 0x000000_rgb .WithAlpha(alpha));
 		}
 		else
 		{
-			drawchar(x, y, 0xE00C, 160, 144, 32, alpha);
-			drawchar(x, y, 0xE004, 255, 255, 255, alpha);
+			BlendChar({ x, y }, 0xE00C, 0xA09020_rgb .WithAlpha(alpha));
+			BlendChar({ x, y }, 0xE004, 0xFFFFFF_rgb .WithAlpha(alpha));
 		}
 		break;
 	case IconClose:
 		if(invert)
-			drawchar(x, y, 0xE02A, 20, 20, 20, alpha);
+			BlendChar({ x, y }, 0xE02A, 0x141414_rgb .WithAlpha(alpha));
 		else
-			drawchar(x, y, 0xE02A, 230, 230, 230, alpha);
+			BlendChar({ x, y }, 0xE02A, 0xE6E6E6_rgb .WithAlpha(alpha));
 		break;
 	case IconVoteSort:
 		if (invert)
 		{
-			drawchar(x, y, 0xE029, 44, 48, 32, alpha);
-			drawchar(x, y, 0xE028, 32, 44, 32, alpha);
-			drawchar(x, y, 0xE027, 128, 128, 128, alpha);
+			BlendChar({ x, y }, 0xE029, 0x2C3020_rgb .WithAlpha(alpha));
+			BlendChar({ x, y }, 0xE028, 0x202C20_rgb .WithAlpha(alpha));
+			BlendChar({ x, y }, 0xE027, 0x808080_rgb .WithAlpha(alpha));
 		}
 		else
 		{
-			drawchar(x, y, 0xE029, 144, 48, 32, alpha);
-			drawchar(x, y, 0xE028, 32, 144, 32, alpha);
-			drawchar(x, y, 0xE027, 255, 255, 255, alpha);
+			BlendChar({ x, y }, 0xE029, 0x903020_rgb .WithAlpha(alpha));
+			BlendChar({ x, y }, 0xE028, 0x209020_rgb .WithAlpha(alpha));
+			BlendChar({ x, y }, 0xE027, 0xFFFFFF_rgb .WithAlpha(alpha));
 		}
 		break;
 	case IconDateSort:
 		if (invert)
 		{
-			drawchar(x, y, 0xE026, 32, 32, 32, alpha);
+			BlendChar({ x, y }, 0xE026, 0x202020_rgb .WithAlpha(alpha));
 		}
 		else
 		{
-			drawchar(x, y, 0xE026, 255, 255, 255, alpha);
+			BlendChar({ x, y }, 0xE026, 0xFFFFFF_rgb .WithAlpha(alpha));
 		}
 		break;
 	case IconMyOwn:
 		if (invert)
 		{
-			drawchar(x, y, 0xE014, 192, 160, 64, alpha);
-			drawchar(x, y, 0xE013, 32, 32, 32, alpha);
+			BlendChar({ x, y }, 0xE014, 0xC0A040_rgb .WithAlpha(alpha));
+			BlendChar({ x, y }, 0xE013, 0x202020_rgb .WithAlpha(alpha));
 		}
 		else
 		{
-			drawchar(x, y, 0xE014, 192, 160, 64, alpha);
-			drawchar(x, y, 0xE013, 255, 255, 255, alpha);
+			BlendChar({ x, y }, 0xE014, 0xC0A040_rgb .WithAlpha(alpha));
+			BlendChar({ x, y }, 0xE013, 0xFFFFFF_rgb .WithAlpha(alpha));
 		}
 		break;
 	case IconSearch:
-		drawchar(x, y, 0xE00E, 30, 30, 180, alpha);
-		drawchar(x, y, 0xE00F, 255, 255, 255, alpha);
+		BlendChar({ x, y }, 0xE00E, 0x1E1EB4_rgb .WithAlpha(alpha));
+		BlendChar({ x, y }, 0xE00F, 0xFFFFFF_rgb .WithAlpha(alpha));
 		break;
 	case IconDelete:
 		if(invert)
 		{
-			drawchar(x, y, 0xE006, 159, 47, 31, alpha);
-			drawchar(x, y, 0xE005, 0, 0, 0, alpha);
+			BlendChar({ x, y }, 0xE006, 0x9F2F1F_rgb .WithAlpha(alpha));
+			BlendChar({ x, y }, 0xE005, 0x000000_rgb .WithAlpha(alpha));
 		}
 		else
 		{
-			drawchar(x, y, 0xE006, 159, 47, 31, alpha);
-			drawchar(x, y, 0xE005, 255, 255, 255, alpha);
+			BlendChar({ x, y }, 0xE006, 0x9F2F1F_rgb .WithAlpha(alpha));
+			BlendChar({ x, y }, 0xE005, 0xFFFFFF_rgb .WithAlpha(alpha));
 		}
 		break;
 	case IconAdd:
 		if(invert)
 		{
-			drawchar(x, y, 0xE006, 32, 144, 32, alpha);
-			drawchar(x, y, 0xE009, 0, 0, 0, alpha);
+			BlendChar({ x, y }, 0xE006, 0x209020_rgb .WithAlpha(alpha));
+			BlendChar({ x, y }, 0xE009, 0x000000_rgb .WithAlpha(alpha));
 		}
 		else
 		{
-			drawchar(x, y, 0xE006, 32, 144, 32, alpha);
-			drawchar(x, y, 0xE009, 255, 255, 255, alpha);
+			BlendChar({ x, y }, 0xE006, 0x209020_rgb .WithAlpha(alpha));
+			BlendChar({ x, y }, 0xE009, 0xFFFFFF_rgb .WithAlpha(alpha));
 		}
 		break;
 	case IconVelocity:
-		drawchar(x+1, y, 0xE018, 128, 160, 255, alpha);
+		BlendChar({ x + 1, y }, 0xE018, 0x80A0FF_rgb .WithAlpha(alpha));
 		break;
 	case IconPressure:
 		if(invert)
-			drawchar(x+1, y+1, 0xE019, 180, 160, 16, alpha);
+			BlendChar({ x + 1, y + 1 }, 0xE019, 0xB4A010_rgb .WithAlpha(alpha));
 		else
-			drawchar(x+1, y+1, 0xE019, 255, 212, 32, alpha);
+			BlendChar({ x + 1, y + 1 }, 0xE019, 0xFFD420_rgb .WithAlpha(alpha));
 		break;
 	case IconPersistant:
 		if(invert)
-			drawchar(x+1, y+1, 0xE01A, 20, 20, 20, alpha);
+			BlendChar({ x + 1, y + 1 }, 0xE01A, 0x141414_rgb .WithAlpha(alpha));
 		else
-			drawchar(x+1, y+1, 0xE01A, 212, 212, 212, alpha);
+			BlendChar({ x + 1, y + 1 }, 0xE01A, 0xD4D4D4_rgb .WithAlpha(alpha));
 		break;
 	case IconFire:
-		drawchar(x+1, y+1, 0xE01B, 255, 0, 0, alpha);
-		drawchar(x+1, y+1, 0xE01C, 255, 255, 64, alpha);
+		BlendChar({ x + 1, y + 1 }, 0xE01B, 0xFF0000_rgb .WithAlpha(alpha));
+		BlendChar({ x + 1, y + 1 }, 0xE01C, 0xFFFF40_rgb .WithAlpha(alpha));
 		break;
 	case IconBlob:
 		if(invert)
-			drawchar(x+1, y, 0xE03F, 55, 180, 55, alpha);
+			BlendChar({ x + 1, y }, 0xE03F, 0x37B437_rgb .WithAlpha(alpha));
 		else
-			drawchar(x+1, y, 0xE03F, 55, 255, 55, alpha);
+			BlendChar({ x + 1, y }, 0xE03F, 0x37FF37_rgb .WithAlpha(alpha));
 		break;
 	case IconHeat:
-		drawchar(x+3, y, 0xE03E, 255, 0, 0, alpha);
+		BlendChar({ x + 3, y }, 0xE03E, 0xFF0000_rgb .WithAlpha(alpha));
 		if(invert)
-			drawchar(x+3, y, 0xE03D, 0, 0, 0, alpha);
+			BlendChar({ x + 3, y }, 0xE03D, 0x000000_rgb .WithAlpha(alpha));
 		else
-			drawchar(x+3, y, 0xE03D, 255, 255, 255, alpha);
+			BlendChar({ x + 3, y }, 0xE03D, 0xFFFFFF_rgb .WithAlpha(alpha));
 		break;
 	case IconBlur:
 		if(invert)
-			drawchar(x+1, y, 0xE044, 50, 70, 180, alpha);
+			BlendChar({ x + 1, y }, 0xE044, 0x3246B4_rgb .WithAlpha(alpha));
 		else
-			drawchar(x+1, y, 0xE044, 100, 150, 255, alpha);
+			BlendChar({ x + 1, y }, 0xE044, 0x6496FF_rgb .WithAlpha(alpha));
 		break;
 	case IconGradient:
 		if(invert)
-			drawchar(x+1, y+1, 0xE053, 255, 50, 255, alpha);
+			BlendChar({ x + 1, y + 1 }, 0xE053, 0xFF32FF_rgb .WithAlpha(alpha));
 		else
-			drawchar(x+1, y+1, 0xE053, 205, 50, 205, alpha);
+			BlendChar({ x + 1, y + 1 }, 0xE053, 0xCD32CD_rgb .WithAlpha(alpha));
 		break;
 	case IconLife:
 		if(invert)
-			drawchar(x, y+1, 0xE060, 0, 0, 0, alpha);
+			BlendChar({ x, y + 1 }, 0xE060, 0x000000_rgb .WithAlpha(alpha));
 		else
-			drawchar(x, y+1, 0xE060, 255, 255, 255, alpha);
+			BlendChar({ x, y + 1 }, 0xE060, 0xFFFFFF_rgb .WithAlpha(alpha));
 		break;
 	case IconEffect:
-		drawchar(x+1, y, 0xE061, 255, 255, 160, alpha);
+		BlendChar({ x + 1, y }, 0xE061, 0xFFFFA0_rgb .WithAlpha(alpha));
 		break;
 	case IconGlow:
-		drawchar(x+1, y, 0xE05F, 200, 255, 255, alpha);
+		BlendChar({ x + 1, y }, 0xE05F, 0xC8FFFF_rgb .WithAlpha(alpha));
 		break;
 	case IconWarp:
-		drawchar(x+1, y, 0xE05E, 255, 255, 255, alpha);
+		BlendChar({ x + 1, y }, 0xE05E, 0xFFFFFF_rgb .WithAlpha(alpha));
 		break;
 	case IconBasic:
 		if(invert)
-			drawchar(x+1, y+1, 0xE05B, 50, 50, 0, alpha);
+			BlendChar({ x + 1, y + 1 }, 0xE05B, 0x323200_rgb .WithAlpha(alpha));
 		else
-			drawchar(x+1, y+1, 0xE05B, 255, 255, 200, alpha);
+			BlendChar({ x + 1, y + 1 }, 0xE05B, 0xFFFFC8_rgb .WithAlpha(alpha));
 		break;
 	case IconAltAir:
 		if(invert) {
-			drawchar(x+1, y+1, 0xE054, 180, 55, 55, alpha);
-			drawchar(x+1, y+1, 0xE055, 55, 180, 55, alpha);
+			BlendChar({ x + 1, y + 1 }, 0xE054, 0xB43737_rgb .WithAlpha(alpha));
+			BlendChar({ x + 1, y + 1 }, 0xE055, 0x37B437_rgb .WithAlpha(alpha));
 		} else {
-			drawchar(x+1, y+1, 0xE054, 255, 55, 55, alpha);
-			drawchar(x+1, y+1, 0xE055, 55, 255, 55, alpha);
+			BlendChar({ x + 1, y + 1 }, 0xE054, 0xFF3737_rgb .WithAlpha(alpha));
+			BlendChar({ x + 1, y + 1 }, 0xE055, 0x37FF37_rgb .WithAlpha(alpha));
 		}
+		break;
+	case IconVort:
+		if(invert)
+			BlendChar({ x + 1, y + 1 }, 0xE054, 0xA64D79_rgb .WithAlpha(alpha));
+		else
+			BlendChar({ x + 1, y + 1 }, 0xE054, 0xC27BA0_rgb .WithAlpha(alpha));
 		break;
 	default:
 		if(invert)
-			drawchar(x, y, 't', 0, 0, 0, alpha);
+			BlendChar({ x, y }, 't', 0x000000_rgb .WithAlpha(alpha));
 		else
-			drawchar(x, y, 't', 255, 255, 255, alpha);
+			BlendChar({ x, y }, 't', 0xFFFFFF_rgb .WithAlpha(alpha));
 		break;
 	}
 }
@@ -459,38 +463,37 @@ void Graphics::SwapClipRect(Rect<int> &rect)
 	clipRect &= video.Size().OriginRect();
 }
 
-bool Graphics::GradientStop::operator <(const GradientStop &other) const
+void Graphics::RenderZoom()
 {
-	return point < other.point;
-}
-
-std::vector<pixel> Graphics::Gradient(std::vector<GradientStop> stops, int resolution)
-{
-	std::vector<pixel> table(resolution, 0);
-	if (stops.size() >= 2)
+	if(!zoomEnabled)
+		return;
 	{
-		std::sort(stops.begin(), stops.end());
-		auto stop = -1;
-		for (auto i = 0; i < resolution; ++i)
+		int x, y, i, j;
+		pixel pix;
+
+		DrawFilledRect(RectSized(zoomWindowPosition, { zoomScopeSize * ZFACTOR, zoomScopeSize * ZFACTOR }), 0x000000_rgb);
+		DrawRect(RectSized(zoomWindowPosition - Vec2{ 2, 2 }, Vec2{ zoomScopeSize*ZFACTOR+3, zoomScopeSize*ZFACTOR+3 }), 0xC0C0C0_rgb);
+		DrawRect(RectSized(zoomWindowPosition - Vec2{ 1, 1 }, Vec2{ zoomScopeSize*ZFACTOR+1, zoomScopeSize*ZFACTOR+1 }), 0x000000_rgb);
+		for (j=0; j<zoomScopeSize; j++)
+			for (i=0; i<zoomScopeSize; i++)
+			{
+				pix = video[{ i + zoomScopePosition.X, j + zoomScopePosition.Y }];
+				for (y=0; y<ZFACTOR-1; y++)
+					for (x=0; x<ZFACTOR-1; x++)
+						video[{ i * ZFACTOR + x + zoomWindowPosition.X, j * ZFACTOR + y + zoomWindowPosition.Y }] = pix;
+			}
+		if (zoomEnabled)
 		{
-			auto point = i / (float)resolution;
-			while (stop < (int)stops.size() - 1 && stops[stop + 1].point <= point)
+			for (j=-1; j<=zoomScopeSize; j++)
 			{
-				++stop;
+				XorPixel(zoomScopePosition + Vec2{ j, -1 });
+				XorPixel(zoomScopePosition + Vec2{ j, zoomScopeSize });
 			}
-			if (stop < 0 || stop >= (int)stops.size() - 1)
+			for (j=0; j<zoomScopeSize; j++)
 			{
-				continue;
+				XorPixel(zoomScopePosition + Vec2{ -1, j });
+				XorPixel(zoomScopePosition + Vec2{ zoomScopeSize, j });
 			}
-			auto &left = stops[stop];
-			auto &right = stops[stop + 1];
-			auto f = (point - left.point) / (right.point - left.point);
-			table[i] = PIXRGB(
-				int(int(PIXR(left.color)) + (int(PIXR(right.color)) - int(PIXR(left.color))) * f),
-				int(int(PIXG(left.color)) + (int(PIXG(right.color)) - int(PIXG(left.color))) * f),
-				int(int(PIXB(left.color)) + (int(PIXB(right.color)) - int(PIXB(left.color))) * f)
-			);
 		}
 	}
-	return table;
 }

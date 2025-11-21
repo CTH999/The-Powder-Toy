@@ -1,4 +1,5 @@
 #include "simulation/ElementCommon.h"
+#include "graphics/VideoBuffer.h"
 
 static std::unique_ptr<VideoBuffer> iconGen(int wallID, Vec2<int> size);
 
@@ -6,7 +7,7 @@ void Element::Element_NONE()
 {
 	Identifier = "DEFAULT_PT_NONE";
 	Name = "NONE";
-	Colour = PIXPACK(0x000000);
+	Colour = 0x000000_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_SPECIAL;
 	Enabled = 1;

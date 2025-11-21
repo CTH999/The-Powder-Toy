@@ -1,24 +1,25 @@
 #pragma once
 #include "Request.h"
 #include "common/String.h"
+#include "Format.h"
 #include <json/json.h>
-#include <memory>
-#include <map>
 
 namespace http
 {
 	class APIRequest : public Request
 	{
+		bool checkStatus;
+
 	public:
-		struct Result
+		enum AuthMode
 		{
-			int status;
-			std::unique_ptr<Json::Value> document;
+			authRequire,
+			authRequireAppendSession,
+			authUse,
+			authOmit,
 		};
+		APIRequest(format::Url url, AuthMode authMode, bool newCheckStatus);
 
-		APIRequest(ByteString url);
-		virtual ~APIRequest();
-
-		Result Finish();
+		Json::Value Finish();
 	};
 }

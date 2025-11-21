@@ -1,7 +1,6 @@
 #include "UpdateActivity.h"
 #include "client/http/Request.h"
 #include "prefs/GlobalPrefs.h"
-#include "client/Client.h"
 #include "common/platform/Platform.h"
 #include "tasks/Task.h"
 #include "tasks/TaskWindow.h"
@@ -40,13 +39,29 @@ private:
 		notifyProgress(-1);
 		while(!request->CheckDone())
 		{
-			int total, done;
+			int64_t total, done;
 			std::tie(total, done) = request->CheckProgress();
-			notifyProgress(total ? done * 100 / total : 0);
+			if (total == -1)
+			{
+				notifyProgress(-1);
+			}
+			else
+			{
+				notifyProgress(total ? done * 100 / total : 0);
+			}
 			Platform::Millisleep(1);
 		}
 
-		auto [ status, data ] = request->Finish();
+		int status;
+		ByteString data;
+		try
+		{
+			std::tie(status, data) = request->Finish();
+		}
+		catch (const http::RequestError &ex)
+		{
+			return niceNotifyError("Could not download update: " + String::Build("Server responded with Status ", ByteString(ex.what()).FromAscii()));
+		}
 		if (status!=200)
 		{
 			return niceNotifyError("Could not download update: " + String::Build("Server responded with Status ", status));
@@ -78,7 +93,7 @@ private:
 		std::vector<char> res(uncompressedLength);
 
 		int dstate;
-		dstate = BZ2_bzBuffToBuffDecompress(&res[0], (unsigned *)&uncompressedLength, &data[8], data.size()-8, 0, 0);
+		dstate = BZ2_bzBuffToBuffDecompress(res.data(), (unsigned *)&uncompressedLength, &data[8], data.size()-8, 0, 0);
 		if (dstate)
 		{
 			return niceNotifyError(String::Build("Unable to decompress update: ", dstate));
@@ -100,9 +115,9 @@ private:
 	}
 };
 
-UpdateActivity::UpdateActivity() {
-	ByteString file = ByteString::Build(SCHEME, USE_UPDATESERVER ? UPDATESERVER : SERVER, Client::Ref().GetUpdateInfo().File);
-	updateDownloadTask = new UpdateDownloadTask(file, this);
+UpdateActivity::UpdateActivity(UpdateInfo info)
+{
+	updateDownloadTask = new UpdateDownloadTask(info.file, this);
 	updateWindow = new TaskWindow("Downloading update...", updateDownloadTask, true);
 }
 
@@ -136,7 +151,7 @@ void UpdateActivity::NotifyError(Task * sender)
 	new ConfirmPrompt("Autoupdate failed", sb.Build(), { [this] {
 		if constexpr (!USE_UPDATESERVER)
 		{
-			Platform::OpenURI(ByteString(SCHEME) + "powdertoy.co.uk/Download.html");
+			Platform::OpenURI(ByteString::Build(SERVER, "/Download.html"));
 		}
 		Exit();
 	}, [this] { Exit(); } });

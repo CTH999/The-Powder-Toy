@@ -2,9 +2,13 @@
 #include "common/String.h"
 #include "Activity.h"
 #include "client/UserInfo.h"
-#include "client/http/SaveUserInfoRequest.h"
-#include "client/http/GetUserInfoRequest.h"
 #include <memory>
+
+namespace http
+{
+	class SaveUserInfoRequest;
+	class GetUserInfoRequest;
+}
 
 namespace ui
 {
@@ -29,7 +33,7 @@ class ProfileActivity: public WindowActivity {
 public:
 	ProfileActivity(ByteString username);
 	virtual ~ProfileActivity();
-	void OnTick(float dt) override;
+	void OnTick() override;
 	void OnDraw() override;
 	void OnTryExit(ExitMethod method) override;
 

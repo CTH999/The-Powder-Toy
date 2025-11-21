@@ -1,13 +1,16 @@
 #pragma once
 #include "common/ExplicitSingleton.h"
 #include "common/String.h"
+#include "client/http/PostData.h"
 #include <atomic>
+#include <cstdint>
 #include <thread>
 #include <vector>
 #include <memory>
 #include <mutex>
-#include <map>
 #include <condition_variable>
+#include <optional>
+#include <utility>
 
 namespace http
 {
@@ -22,10 +25,10 @@ namespace http
 
 	public:
 		ByteString uri;
-		ByteString verb;
+		std::optional<ByteString> verb;
 		bool isPost = false;
-		std::map<ByteString, ByteString> postData;
-		std::vector<ByteString> headers;
+		PostData postData;
+		std::vector<Header> headers;
 
 		enum State
 		{
@@ -37,12 +40,13 @@ namespace http
 		State state = ready;
 		std::mutex stateMx;
 		std::condition_variable stateCv;
-		std::atomic<int> bytesTotal = 0;
-		std::atomic<int> bytesDone = 0;
+		std::atomic<int64_t> bytesTotal = -1;
+		std::atomic<int64_t> bytesDone = 0;
 		int statusCode = 0;
 		ByteString responseData;
-		std::vector<ByteString> responseHeaders;
-		ByteString error;
+		std::vector<Header> responseHeaders;
+		std::optional<ByteString> error;
+		std::optional<ByteString> failEarly;
 
 		RequestHandle(CtorTag)
 		{
@@ -50,6 +54,8 @@ namespace http
 
 		RequestHandle(const RequestHandle &) = delete;
 		RequestHandle &operator =(const RequestHandle &) = delete;
+
+		void MarkDone();
 
 		static std::shared_ptr<RequestHandle> Create();
 	};
@@ -62,41 +68,48 @@ namespace http
 	using RequestManagerPtr = std::unique_ptr<RequestManager, RequestManagerDeleter>;
 	class RequestManager : public ExplicitSingleton<RequestManager>
 	{
-		ByteString proxy;
-		ByteString cafile;
-		ByteString capath;
-		ByteString userAgent;
-		bool disableNetwork;
-
-		std::thread worker;
-		void InitWorker();
-		void Worker();
-		void ExitWorker();
-
-		std::vector<std::shared_ptr<RequestHandle>> requestHandles;
-		void RegisterRequestHandle(std::shared_ptr<RequestHandle> requestHandle);
-		void UnregisterRequestHandle(std::shared_ptr<RequestHandle> requestHandle);
-		void Tick();
-
-		// State shared between Request threads and the worker thread.
-		std::vector<std::shared_ptr<RequestHandle>> requestHandlesToRegister;
-		std::vector<std::shared_ptr<RequestHandle>> requestHandlesToUnregister;
-		bool running = true;
-		std::mutex sharedStateMx;
+	public:
+		struct Config
+		{
+			std::optional<ByteString> proxy;
+			std::optional<ByteString> cafile;
+			std::optional<ByteString> capath;
+			bool disableNetwork = false;
+		};
 
 	protected:
-		RequestManager(ByteString newProxy, ByteString newCafile, ByteString newCapath, bool newDisableNetwork);
+		Config config;
+		ByteString userAgent;
+
+		RequestManager(Config newConfig);
+
+		void RegisterRequestImpl(Request &request);
+		void UnregisterRequestImpl(Request &request);
 
 	public:
-		~RequestManager();
-
 		void RegisterRequest(Request &request);
 		void UnregisterRequest(Request &request);
 
-		bool DisableNetwork() const;
+		bool DisableNetwork() const
+		{
+			return config.disableNetwork;
+		}
 
-		static RequestManagerPtr Create(ByteString newProxy, ByteString newCafile, ByteString newCapath, bool newDisableNetwork);
+		const std::optional<ByteString> &Cafile() const
+		{
+			return config.cafile;
+		}
+
+		const std::optional<ByteString> &Capath() const
+		{
+			return config.capath;
+		}
+
+		const std::optional<ByteString> &Proxy() const
+		{
+			return config.proxy;
+		}
+
+		static RequestManagerPtr Create(Config newConfig);
 	};
-
-	constexpr int TickMs = 100;
 }
