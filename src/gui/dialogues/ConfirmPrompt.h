@@ -1,26 +1,20 @@
-#ifndef CONFIRMPROMPT_H_
-#define CONFIRMPROMPT_H_
-
-#include <string>
+#pragma once
 #include "gui/interface/Window.h"
 
-class ConfirmDialogueCallback;
-class ConfirmPrompt: public ui::Window {
-public:
-	enum DialogueResult { ResultCancel, ResultOkay };
-	ConfirmPrompt(std::string title, std::string message, ConfirmDialogueCallback * callback_ = NULL);
-	ConfirmPrompt(std::string title, std::string message, std::string buttonText, ConfirmDialogueCallback * callback_ = NULL);
-	static bool Blocking(std::string title, std::string message, std::string buttonText = "Confirm");
-	virtual void OnDraw();
-	virtual ~ConfirmPrompt();
-	ConfirmDialogueCallback * callback;
-};
+#include <functional>
 
-class ConfirmDialogueCallback
+class ConfirmPrompt : public ui::Window
 {
-	public:
-		virtual void ConfirmCallback(ConfirmPrompt::DialogueResult result) {}
-		virtual ~ConfirmDialogueCallback() {}
-};
+	struct ResultCallback
+	{
+		std::function<void ()> okay, cancel;
+	};
 
-#endif /* CONFIRMPROMPT_H_ */
+	ResultCallback callback;
+
+public:
+	ConfirmPrompt(String title, String message, ResultCallback callback_ = {}, String buttonText = String("Confirm"));
+	virtual ~ConfirmPrompt() = default;
+
+	void OnDraw() override;
+};

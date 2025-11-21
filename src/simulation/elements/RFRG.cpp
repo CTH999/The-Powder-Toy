@@ -1,10 +1,11 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_RFRG PT_RFRG 183
-Element_RFRG::Element_RFRG()
+#include "simulation/ElementCommon.h"
+#include "RFRG.h"
+
+void Element::Element_RFRG()
 {
 	Identifier = "DEFAULT_PT_RFRG";
 	Name = "RFRG";
-	Colour = PIXPACK(0x72D2D4);
+	Colour = 0x72D2D4_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_GAS;
 	Enabled = 1;
@@ -22,11 +23,10 @@ Element_RFRG::Element_RFRG()
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 0;
-	Hardness = 20;
+	Hardness = 21;
 
 	Weight = 1;
 
-	Temperature = R_TEMP + 273.15f;
 	HeatConduct = 3;
 	Description = "Refrigerant. Heats up and liquefies under pressure.";
 
@@ -41,11 +41,10 @@ Element_RFRG::Element_RFRG()
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
 
-	Update = &Element_RFRG::update;
+	Update = &Element_RFRG_update;
 }
 
-//#TPT-Directive ElementHeader Element_RFRG static int update(UPDATE_FUNC_ARGS)
-int Element_RFRG::update(UPDATE_FUNC_ARGS)
+int Element_RFRG_update(UPDATE_FUNC_ARGS)
 {
 	float new_pressure = sim->pv[y/CELL][x/CELL];
 	float *old_pressure = (float *)&parts[i].tmp;
@@ -54,15 +53,12 @@ int Element_RFRG::update(UPDATE_FUNC_ARGS)
 		*old_pressure = new_pressure;
 		return 0;
 	}
-	
+
 	// * 0 bar seems to be pressure value -256 in TPT, see Air.cpp. Also, 1 bar seems to be pressure value 0.
 	//   With those two values we can set up our pressure scale which states that ... the highest pressure
 	//   we can achieve in TPT is 2 bar. That's not particularly realistic, but good enough for TPT.
-	
+
 	parts[i].temp = restrict_flt(parts[i].temp * ((new_pressure + 257.f) / (*old_pressure + 257.f)), 0, MAX_TEMP);
 	*old_pressure = new_pressure;
 	return 0;
 }
-
-
-Element_RFRG::~Element_RFRG() {}

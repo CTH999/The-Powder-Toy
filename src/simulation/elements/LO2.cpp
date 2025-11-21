@@ -1,10 +1,10 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_LO2 PT_LO2 60
-Element_LO2::Element_LO2()
+#include "simulation/ElementCommon.h"
+
+void Element::Element_LO2()
 {
 	Identifier = "DEFAULT_PT_LO2";
 	Name = "LOXY";
-	Colour = PIXPACK(0x80A0EF);
+	Colour = 0x80A0EF_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_LIQUID;
 	Enabled = 1;
@@ -26,7 +26,7 @@ Element_LO2::Element_LO2()
 
 	Weight = 30;
 
-	Temperature = 80.0f;
+	DefaultProperties.temp = 80.0f;
 	HeatConduct = 70;
 	Description = "Liquid Oxygen. Very cold. Reacts with fire.";
 
@@ -40,8 +40,4 @@ Element_LO2::Element_LO2()
 	LowTemperatureTransition = NT;
 	HighTemperature = 90.1f;
 	HighTemperatureTransition = PT_O2;
-
-	Update = NULL;
 }
-
-Element_LO2::~Element_LO2() {}

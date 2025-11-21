@@ -1,64 +1,65 @@
-#ifndef SAVEBUTTON_H_
-#define SAVEBUTTON_H_
-
-#include <string>
+#pragma once
+#include "common/String.h"
 
 #include "Component.h"
-#include "client/SaveFile.h"
-#include "client/SaveInfo.h"
-#include "client/requestbroker/RequestListener.h"
-#include "graphics/Graphics.h"
-#include "gui/interface/Colour.h"
+#include "client/http/ThumbnailRequest.h"
 
+#include <memory>
+#include <functional>
+
+class VideoBuffer;
+class SaveFile;
+class SaveInfo;
+class ThumbnailRendererTask;
 namespace ui
 {
-class SaveButton;
-class SaveButtonAction
+class SaveButton : public Component
 {
-public:
-	virtual void ActionCallback(ui::SaveButton * sender) {}
-	virtual void AltActionCallback(ui::SaveButton * sender) {}
-	virtual void AltActionCallback2(ui::SaveButton * sender) {}
-	virtual void SelectedCallback(ui::SaveButton * sender) {}
-	virtual ~SaveButtonAction() {}
-};
-
-class SaveButton : public Component, public RequestListener
-{
-	SaveFile * file;
-	SaveInfo * save;
-	VideoBuffer * thumbnail;
-	std::string name;
-	std::string votesString;
-	std::string votesBackground;
-	std::string votesBackground2;
+	SaveFile *file = nullptr; // non-owning
+	SaveInfo *save = nullptr; // non-owning
+	std::unique_ptr<VideoBuffer> thumbnail;
+	ui::Point thumbSize = ui::Point(0, 0);
+	String name;
+	String votesString;
+	String votesBackground;
+	String votesBackground2;
 	int voteBarHeightUp;
 	int voteBarHeightDown;
 	bool wantsDraw;
-	bool waitingForThumb;
+	bool triedThumbnail;
 	bool isMouseInsideAuthor;
 	bool isMouseInsideHistory;
 	bool showVotes;
+	ThumbnailRendererTask *thumbnailRenderer;
+
+	std::unique_ptr<http::ThumbnailRequest> thumbnailRequest;
+
+	struct SaveButtonAction
+	{
+		std::function<void ()> action, altAction, altAltAction, selected;
+	};
+	SaveButtonAction actionCallback;
+
+	SaveButton(Point position, Point size);
+
 public:
-	SaveButton(Point position, Point size, SaveInfo * save);
-	SaveButton(Point position, Point size, SaveFile * file);
+	SaveButton(Point position, Point size, SaveInfo *newSave /* non-owning */);
+	SaveButton(Point position, Point size, SaveFile *newFile /* non-owning */);
 	virtual ~SaveButton();
 
-	virtual void OnMouseClick(int x, int y, unsigned int button);
-	virtual void OnMouseUnclick(int x, int y, unsigned int button);
+	void OnMouseClick(int x, int y, unsigned int button) override;
+	void OnMouseDown(int x, int y, unsigned int button) override;
 
-	virtual void OnMouseEnter(int x, int y);
-	virtual void OnMouseLeave(int x, int y);
+	void OnMouseEnter(int x, int y) override;
+	void OnMouseLeave(int x, int y) override;
 
-	virtual void OnMouseMovedInside(int x, int y, int dx, int dy);
+	void OnMouseMoved(int x, int y) override;
 
 	void AddContextMenu(int menuType);
-	virtual void OnContextMenuAction(int item);
+	void OnContextMenuAction(int item) override;
 
-	virtual void Draw(const Point& screenPos);
-	virtual void Tick(float dt);
-
-	virtual void OnResponseReady(void * imagePtr, int identifier);
+	void Draw(const Point& screenPos) override;
+	void Tick() override;
 
 	void SetSelected(bool selected_) { selected = selected_; }
 	bool GetSelected() { return selected; }
@@ -66,18 +67,20 @@ public:
 	bool GetSelectable() { return selectable; }
 	void SetShowVotes(bool showVotes_) { showVotes = showVotes_; }
 
-	SaveInfo * GetSave() { return save; }
-	SaveFile * GetSaveFile() { return file; }
+	const SaveInfo *GetSave() const { return save; }
+	const SaveFile *GetSaveFile() const { return file; }
 	inline bool GetState() { return state; }
-	virtual void DoAction();
-	virtual void DoAltAction();
-	virtual void DoAltAction2();
-	virtual void DoSelection();
-	void SetActionCallback(SaveButtonAction * action);
+	void DoAction();
+	void DoAltAction();
+	void DoAltAction2();
+	void DoSelection();
+	inline void SetActionCallback(SaveButtonAction action) { actionCallback = action; }
+
+	// TODO: clone the request instead because sometimes the user of CloneThumbnail might end up
+	// with a nullptr even though the thumbnail for the SaveButton will eventually arrive.
+	std::unique_ptr<VideoBuffer> CloneThumbnail() const;
+
 protected:
 	bool isButtonDown, state, isMouseInside, selected, selectable;
-	SaveButtonAction * actionCallback;
 };
 }
-#endif /* BUTTON_H_ */
-

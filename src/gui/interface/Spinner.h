@@ -1,6 +1,4 @@
-#ifndef SPINNER_H_
-#define SPINNER_H_
-
+#pragma once
 #include "Component.h"
 
 namespace ui
@@ -8,16 +6,11 @@ namespace ui
 
 class Spinner: public Component
 {
-	float cValue;
-	int tickInternal;
 public:
 	Spinner(Point position, Point size);
-	virtual void Tick(float dt);
-	virtual void Draw(const Point& screenPos);
+	void Draw(const Point& screenPos) override;
 	virtual ~Spinner();
 };
 
 }
 
-
-#endif /* SPINNER_H_ */
