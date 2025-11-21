@@ -1,12 +1,13 @@
 #include "simulation/ElementCommon.h"
-//#TPT-Directive ElementClass Element_BIZRS PT_BIZRS 105
-Element_BIZRS::Element_BIZRS()
+#include "BIZR.h"
+
+void Element::Element_BIZRS()
 {
 	Identifier = "DEFAULT_PT_BIZRS";
 	Name = "BIZS";
-	Colour = PIXPACK(0x00E455);
-	MenuVisible = 1;
-	MenuSection = SC_CRACKER2;
+	Colour = 0x00E455_rgb;
+	MenuVisible = 0;
+	MenuSection = SC_SOLIDS;
 	Enabled = 1;
 
 	Advection = 0.0f;
@@ -26,7 +27,7 @@ Element_BIZRS::Element_BIZRS()
 
 	Weight = 100;
 
-	Temperature = R_TEMP+300.0f+273.15f;
+	DefaultProperties.temp = R_TEMP + 300.0f + 273.15f;
 	HeatConduct = 251;
 	Description = "Bizarre solid.";
 
@@ -41,8 +42,8 @@ Element_BIZRS::Element_BIZRS()
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
 
-	Update = &Element_BIZR::update;
-	Graphics = &Element_BIZR::graphics;
+	DefaultProperties.ctype = 0x47FFFF;
+
+	Update = &Element_BIZR_update;
+	Graphics = &Element_BIZR_graphics;
 }
-//BIZRS update is in BIZR.cpp
-Element_BIZRS::~Element_BIZRS() {}

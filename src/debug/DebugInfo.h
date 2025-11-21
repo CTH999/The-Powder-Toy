@@ -1,5 +1,4 @@
 #pragma once
-
 #include "gui/interface/Point.h"
 
 class DebugInfo

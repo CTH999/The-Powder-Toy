@@ -1,12 +1,12 @@
 #include "simulation/ElementCommon.h"
-//#TPT-Directive ElementClass Element_PSTS PT_PSTS 112
-Element_PSTS::Element_PSTS()
+
+void Element::Element_PSTS()
 {
 	Identifier = "DEFAULT_PT_PSTS";
 	Name = "PSTS";
-	Colour = PIXPACK(0x776677);
+	Colour = 0x776677_rgb;
 	MenuVisible = 0;
-	MenuSection = SC_CRACKER;
+	MenuSection = SC_SOLIDS;
 	Enabled = 1;
 
 	Advection = 0.0f;
@@ -22,11 +22,11 @@ Element_PSTS::Element_PSTS()
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 0;
-	Hardness = 20;
+	Hardness = 18;
 
 	Weight = 100;
 
-	Temperature = R_TEMP-2.0f	+273.15f;
+	DefaultProperties.temp = R_TEMP - 2.0f + 273.15f;
 	HeatConduct = 29;
 	Description = "Solid form of PSTE.";
 
@@ -40,8 +40,4 @@ Element_PSTS::Element_PSTS()
 	LowTemperatureTransition = NT;
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
-
-	Update = NULL;
 }
-
-Element_PSTS::~Element_PSTS() {}

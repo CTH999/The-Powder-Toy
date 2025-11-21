@@ -1,16 +1,14 @@
-#ifdef LUACONSOLE
 #include "LuaSmartRef.h"
+#include "LuaScriptInterface.h"
 
 void LuaSmartRef::Clear()
 {
-	luaL_unref(l, LUA_REGISTRYINDEX, ref);
-	ref = LUA_REFNIL;
-}
-
-LuaSmartRef::LuaSmartRef(lua_State *state) :
-	ref(LUA_REFNIL),
-	l(state)
-{
+	auto *lsi = GetLSI();
+	if (lsi)
+	{
+		luaL_unref(lsi->L, LUA_REGISTRYINDEX, ref);
+		ref = LUA_REFNIL;
+	}
 }
 
 LuaSmartRef::~LuaSmartRef()
@@ -18,20 +16,19 @@ LuaSmartRef::~LuaSmartRef()
 	Clear();
 }
 
-void LuaSmartRef::Assign(int index)
+void LuaSmartRef::Assign(lua_State *L, int index)
 {
+	if (index < 0)
+	{
+		index = lua_gettop(L) + index + 1;
+	}
 	Clear();
-	lua_pushvalue(l, index);
-	ref = luaL_ref(l, LUA_REGISTRYINDEX);
+	lua_pushvalue(L, index);
+	ref = luaL_ref(L, LUA_REGISTRYINDEX);
 }
 
-LuaSmartRef::operator int() const
+int LuaSmartRef::Push(lua_State *L)
 {
-	return ref;
+	lua_rawgeti(L, LUA_REGISTRYINDEX, ref);
+	return lua_type(L, -1);
 }
-
-LuaSmartRef::operator bool() const
-{
-	return ref != LUA_REFNIL;
-}
-#endif

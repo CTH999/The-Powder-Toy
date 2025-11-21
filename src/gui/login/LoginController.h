@@ -1,25 +1,22 @@
-#ifndef LOGINCONTROLLER_H_
-#define LOGINCONTROLLER_H_
-
+#pragma once
 #include "common/String.h"
 #include "client/User.h"
+#include <functional>
 
 class LoginView;
 class LoginModel;
-class ControllerCallback;
 class LoginController
 {
 	LoginView * loginView;
 	LoginModel * loginModel;
-	ControllerCallback * callback;
+	std::function<void ()> onDone;
 public:
 	bool HasExited;
-	LoginController(ControllerCallback * callback = NULL);
+	LoginController(std::function<void ()> onDone = nullptr);
 	void Login(ByteString username, ByteString password);
+	void Logout();
+	void Tick();
 	void Exit();
 	LoginView * GetView() { return loginView; }
-	User GetUser();
-	virtual ~LoginController();
+	~LoginController();
 };
-
-#endif /* LOGINCONTROLLER_H_ */

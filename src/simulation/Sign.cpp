@@ -1,7 +1,8 @@
 #include "Sign.h"
 
-#include "graphics/Graphics.h"
-#include "simulation/Simulation.h"
+#include "graphics/Renderer.h"
+#include "Simulation.h"
+#include "SimulationData.h"
 
 sign::sign(String text_, int x_, int y_, Justification justification_):
 	x(x_),
@@ -11,8 +12,9 @@ sign::sign(String text_, int x_, int y_, Justification justification_):
 {
 }
 
-String sign::getDisplayText(Simulation *sim, int &x0, int &y0, int &w, int &h, bool colorize)
+String sign::getDisplayText(const RenderableSimulation *sim, int &x0, int &y0, int &w, int &h, bool colorize, bool *v95) const
 {
+	auto &sd = SimulationData::CRef();
 	String drawable_text;
 	auto si = std::make_pair(0, Type::Normal);
 	if (text.find('{') == text.npos)
@@ -31,7 +33,7 @@ String sign::getDisplayText(Simulation *sim, int &x0, int &y0, int &w, int &h, b
 			Particle const *part = nullptr;
 			float pressure = 0.0f;
 			float aheat = 0.0f;
-			if (x >= 0 && x < XRES && y >= 0 && y < YRES)
+			if (sim && x >= 0 && x < XRES && y >= 0 && y < YRES)
 			{
 				if (sim->photons[y][x])
 				{
@@ -58,34 +60,54 @@ String sign::getDisplayText(Simulation *sim, int &x0, int &y0, int &w, int &h, b
 					if (between_curlies == "t" || between_curlies == "temp")
 					{
 						formatted_text << Format::Precision(Format::ShowPoint(part ? part->temp - 273.15f : 0.0f), 2);
+						// * We would really only need to do this if the sign used the new
+						//   keyword "temp" or if the text was more than just "{t}", but 95.0
+						//   upgrades such signs at load time anyway.
+						// * The same applies to "{p}" and "{aheat}" signs.
+						if (v95)
+							*v95 = true;
 					}
 					else if (between_curlies == "p" || between_curlies == "pres")
 					{
 						formatted_text << Format::Precision(Format::ShowPoint(pressure), 2);
+						if (v95)
+							*v95 = true;
 					}
 					else if (between_curlies == "a" || between_curlies == "aheat")
 					{
 						formatted_text << Format::Precision(Format::ShowPoint(aheat), 2);
+						if (v95)
+							*v95 = true;
 					}
 					else if (between_curlies == "type")
 					{
-						formatted_text << (part ? sim->BasicParticleInfo(*part) : (formatted_text.Size() ? String::Build("empty") : String::Build("Empty")));
+						formatted_text << (part ? sd.BasicParticleInfo(*part) : (formatted_text.Size() ? String::Build("empty") : String::Build("Empty")));
+						if (v95)
+							*v95 = true;
 					}
 					else if (between_curlies == "ctype")
 					{
-						formatted_text << (part ? ((part->ctype && sim->IsValidElement(part->ctype)) ? sim->ElementResolve(part->ctype, -1) : String::Build(part->ctype)) : (formatted_text.Size() ? String::Build("empty") : String::Build("Empty")));
+						formatted_text << (part ? (sd.IsElementOrNone(part->ctype) ? sd.ElementResolve(part->ctype, -1) : String::Build(part->ctype)) : (formatted_text.Size() ? String::Build("empty") : String::Build("Empty")));
+						if (v95)
+							*v95 = true;
 					}
 					else if (between_curlies == "life")
 					{
 						formatted_text << (part ? part->life : 0);
+						if (v95)
+							*v95 = true;
 					}
 					else if (between_curlies == "tmp")
 					{
 						formatted_text << (part ? part->tmp : 0);
+						if (v95)
+							*v95 = true;
 					}
 					else if (between_curlies == "tmp2")
 					{
 						formatted_text << (part ? part->tmp2 : 0);
+						if (v95)
+							*v95 = true;
 					}
 					else
 					{
@@ -114,7 +136,7 @@ String sign::getDisplayText(Simulation *sim, int &x0, int &y0, int &w, int &h, b
 		}
 	}
 
-	w = Graphics::textwidth(drawable_text.c_str()) + 5;
+	w = Renderer::TextSize(drawable_text.c_str()).X + 4;
 	h = 15;
 	x0 = (ju == Right) ? x - w : (ju == Left) ? x : x - w/2;
 	y0 = (y > 18) ? y - 18 : y + 4;
@@ -122,7 +144,7 @@ String sign::getDisplayText(Simulation *sim, int &x0, int &y0, int &w, int &h, b
 	return drawable_text;
 }
 
-std::pair<int, sign::Type> sign::split()
+std::pair<int, sign::Type> sign::split() const
 {
 	String::size_type pipe = 0;
 	if (text.size() >= 4 && text.front() == '{' && text.back() == '}')
@@ -140,7 +162,7 @@ std::pair<int, sign::Type> sign::split()
 						return std::make_pair(0, Type::Normal);
 					}
 				}
-				return std::make_pair(pipe, text[1] == 'c' ? Type::Save : Type::Thread);
+				return std::make_pair(int(pipe), text[1] == 'c' ? Type::Save : Type::Thread);
 			}
 			break;
 
@@ -154,7 +176,7 @@ std::pair<int, sign::Type> sign::split()
 		case 's':
 			if (text[2] == ':' && (pipe = text.find('|', 3)) != text.npos)
 			{
-				return std::make_pair(pipe, Type::Search);
+				return std::make_pair(int(pipe), Type::Search);
 			}
 			break;
 		}

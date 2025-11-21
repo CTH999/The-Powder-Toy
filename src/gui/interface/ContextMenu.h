@@ -1,6 +1,4 @@
-#ifndef The_Powder_Toy_ContextMenu_h
-#define The_Powder_Toy_ContextMenu_h
-
+#pragma once
 #include "Window.h"
 #include "Appearance.h"
 #include "Button.h"
@@ -18,14 +16,15 @@ public:
 	ContextMenuItem(String text, int id, bool enabled) : ID(id), Text(text), Enabled(enabled) {}
 };
 
-class ContextMenu: public ui::Window, public ButtonAction {
+class ContextMenu: public ui::Window {
 	std::vector<Button*> buttons;
 	std::vector<ContextMenuItem> items;
 	ui::Component * source;
 public:
 	ui::Appearance Appearance;
-	class ItemSelectedAction;
 	ContextMenu(Component * source);
+	virtual ~ContextMenu() = default;
+	
 	void ActionCallbackItem(ui::Button *sender, int item);
 	void AddItem(ContextMenuItem item);
 	void RemoveItem(int id);
@@ -33,8 +32,5 @@ public:
 	void Show(ui::Point position);
 	void OnDraw() override;
 	void OnMouseDown(int x, int y, unsigned button) override;
-	virtual ~ContextMenu() {}
 };
 }
-
-#endif

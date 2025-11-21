@@ -1,9 +1,7 @@
-#ifndef CONSOLEMODEL_H_
-#define CONSOLEMODEL_H_
-
+#pragma once
+#include "ConsoleCommand.h"
 #include <vector>
 #include <deque>
-#include "ConsoleCommand.h"
 
 class ConsoleView;
 class ConsoleModel
@@ -22,7 +20,4 @@ public:
 	ConsoleModel();
 	void AddObserver(ConsoleView * observer);
 	void AddLastCommand(ConsoleCommand command);
-	virtual ~ConsoleModel();
 };
-
-#endif /* CONSOLEMODEL_H_ */

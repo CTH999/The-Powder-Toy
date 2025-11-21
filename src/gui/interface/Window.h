@@ -1,9 +1,8 @@
-#ifndef WINDOW_H
-#define WINDOW_H
-
+#pragma once
 #include "common/String.h"
-#include <vector>
 #include "gui/interface/Point.h"
+#include "FpsLimit.h"
+#include <vector>
 
 class Graphics;
 namespace ui
@@ -25,6 +24,7 @@ namespace ui
 	class Window
 	{
 	public:
+		bool contributesToFps = false;
 		Point Position;
 		Point Size;
 
@@ -35,6 +35,7 @@ namespace ui
 		void SetCancelButton(ui::Button * button) { cancelButton = button; }
 
 		bool AllowExclusiveDrawing; //false will not call draw on objects outside of bounds
+		bool DoesTextInput;
 
 		// Add Component to window
 		void AddComponent(Component* c);
@@ -55,7 +56,8 @@ namespace ui
 
 		virtual void DoInitialized();
 		virtual void DoExit();
-		virtual void DoTick(float dt);
+		virtual void DoTick();
+		virtual void DoSimTick();
 		virtual void DoDraw();
 		virtual void DoFocus();
 		virtual void DoBlur();
@@ -68,6 +70,7 @@ namespace ui
 		virtual void DoKeyPress(int key, int scan, bool repeat, bool shift, bool ctrl, bool alt);
 		virtual void DoKeyRelease(int key, int scan, bool repeat, bool shift, bool ctrl, bool alt);
 		virtual void DoTextInput(String text);
+		virtual void DoTextEditing(String text);
 
 		// Sets halt and destroy, this causes the Windows to stop sending events and remove itself.
 		void SelfDestruct();
@@ -82,8 +85,18 @@ namespace ui
 		enum ExitMethod { MouseOutside, Escape, ExitButton };
 
 		void MakeActiveWindow();
-		bool CloseActiveWindow();
+		void CloseActiveWindow();
 		Graphics * GetGraphics();
+		void SetFps(float newFps);
+		float GetFps() const
+		{
+			return fps;
+		}
+		void SetFpsLimit(FpsLimit newFpsLimit);
+		FpsLimit GetFpsLimit() const
+		{
+			return fpsLimit;
+		}
 
 	protected:
 		ui::Button * okayButton;
@@ -91,7 +104,8 @@ namespace ui
 
 		virtual void OnInitialized() {}
 		virtual void OnExit() {}
-		virtual void OnTick(float dt) {}
+		virtual void OnTick() {}
+		virtual void OnSimTick() {}
 		virtual void OnDraw() {}
 		virtual void OnFocus() {}
 		virtual void OnBlur() {}
@@ -107,20 +121,20 @@ namespace ui
 		virtual void OnKeyPress(int key, int scan, bool repeat, bool shift, bool ctrl, bool alt) {}
 		virtual void OnKeyRelease(int key, int scan, bool repeat, bool shift, bool ctrl, bool alt) {}
 		virtual void OnTextInput(String text) {}
+		virtual void OnTextEditing(String text) {}
 		std::vector<Component*> Components;
 		Component *focusedComponent_;
 		Component *hoverComponent;
 		ChromeStyle chrome;
 
-#ifdef DEBUG
 		bool debugMode;
-#endif
 		//These controls allow a component to call the destruction of the Window inside an event (called by the Window)
 		void finalise();
 		bool halt;
 		bool destruct;
 		bool stop;
 
+		float fps;
+		FpsLimit fpsLimit = FpsLimitFollowDraw{};
 	};
 }
-#endif // WINDOW_H

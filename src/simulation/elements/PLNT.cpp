@@ -1,12 +1,14 @@
-#include "common/tpt-minmax.h"
 #include "simulation/ElementCommon.h"
+#include <algorithm>
 
-//#TPT-Directive ElementClass Element_PLNT PT_PLNT 20
-Element_PLNT::Element_PLNT()
+static int update(UPDATE_FUNC_ARGS);
+static int graphics(GRAPHICS_FUNC_ARGS);
+
+void Element::Element_PLNT()
 {
 	Identifier = "DEFAULT_PT_PLNT";
 	Name = "PLNT";
-	Colour = PIXPACK(0x0CAC00);
+	Colour = 0x0CAC00_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_SOLIDS;
 	Enabled = 1;
@@ -29,7 +31,6 @@ Element_PLNT::Element_PLNT()
 
 	Weight = 100;
 
-	Temperature = R_TEMP+0.0f	+273.15f;
 	HeatConduct = 65;
 	Description = "Plant, drinks water and grows.";
 
@@ -44,31 +45,31 @@ Element_PLNT::Element_PLNT()
 	HighTemperature = 573.0f;
 	HighTemperatureTransition = PT_FIRE;
 
-	Update = &Element_PLNT::update;
-	Graphics = &Element_PLNT::graphics;
+	Update = &update;
+	Graphics = &graphics;
 }
 
-//#TPT-Directive ElementHeader Element_PLNT static int update(UPDATE_FUNC_ARGS)
-int Element_PLNT::update(UPDATE_FUNC_ARGS)
+static int update(UPDATE_FUNC_ARGS)
 {
-	int r, rx, ry, np, rndstore;
-	for (rx=-1; rx<2; rx++)
-		for (ry=-1; ry<2; ry++)
-			if (BOUNDS_CHECK && (rx || ry))
+	for (auto rx = -1; rx <= 1; rx++)
+	{
+		for (auto ry = -1; ry <= 1; ry++)
+		{
+			if (rx || ry)
 			{
-				r = pmap[y+ry][x+rx];
+				auto r = pmap[y+ry][x+rx];
 				switch (TYP(r))
 				{
 				case PT_WATR:
-					if (RNG::Ref().chance(1, 50))
+					if (sim->rng.chance(1, 50))
 					{
-						np = sim->create_part(ID(r),x+rx,y+ry,PT_PLNT);
+						auto np = sim->create_part(ID(r),x+rx,y+ry,PT_PLNT);
 						if (np<0) continue;
 						parts[np].life = 0;
 					}
 					break;
 				case PT_LAVA:
-					if (RNG::Ref().chance(1, 50))
+					if (sim->rng.chance(1, 50))
 					{
 						sim->part_change_type(i,x,y,PT_FIRE);
 						parts[i].life = 4;
@@ -76,27 +77,29 @@ int Element_PLNT::update(UPDATE_FUNC_ARGS)
 					break;
 				case PT_SMKE:
 				case PT_CO2:
-					if (RNG::Ref().chance(1, 50))
+					if (sim->rng.chance(1, 50))
 					{
 						sim->kill_part(ID(r));
-						parts[i].life = RNG::Ref().between(60, 119);
+						parts[i].life = sim->rng.between(60, 119);
 					}
 					break;
 				case PT_WOOD:
-					rndstore = RNG::Ref().gen();
-					if (surround_space && !(rndstore%4) && parts[i].tmp==1)
 					{
-						rndstore >>= 3;
-						int nnx = (rndstore%3) -1;
-						rndstore >>= 2;
-						int nny = (rndstore%3) -1;
-						if (nnx || nny)
+						auto rndstore = sim->rng.gen();
+						if (surround_space && !(rndstore%4) && parts[i].tmp==1)
 						{
-							if (pmap[y+ry+nny][x+rx+nnx])
-								continue;
-							np = sim->create_part(-1,x+rx+nnx,y+ry+nny,PT_VINE);
-							if (np<0) continue;
-							parts[np].temp = parts[i].temp;
+							rndstore >>= 3;
+							int nnx = (rndstore%3) -1;
+							rndstore >>= 2;
+							int nny = (rndstore%3) -1;
+							if (nnx || nny)
+							{
+								if (pmap[y+ry+nny][x+rx+nnx])
+									continue;
+								auto np = sim->create_part(-1,x+rx+nnx,y+ry+nny,PT_VINE);
+								if (np<0) continue;
+								parts[np].temp = parts[i].temp;
+							}
 						}
 					}
 					break;
@@ -104,16 +107,22 @@ int Element_PLNT::update(UPDATE_FUNC_ARGS)
 					continue;
 				}
 			}
+		}
+	}
 	if (parts[i].life==2)
 	{
-		for (rx=-1; rx<2; rx++)
-			for (ry=-1; ry<2; ry++)
-				if (BOUNDS_CHECK && (rx || ry))
+		for (auto rx = -1; rx <= 1; rx++)
+		{
+			for (auto ry = -1; ry <= 1; ry++)
+			{
+				if (rx || ry)
 				{
-					r = pmap[y+ry][x+rx];
+					auto r = pmap[y+ry][x+rx];
 					if (!r)
 						sim->create_part(-1,x+rx,y+ry,PT_O2);
 				}
+			}
+		}
 		parts[i].life = 0;
 	}
 	if (parts[i].temp > 350 && parts[i].temp > parts[i].tmp2)
@@ -121,8 +130,7 @@ int Element_PLNT::update(UPDATE_FUNC_ARGS)
 	return 0;
 }
 
-//#TPT-Directive ElementHeader Element_PLNT static int graphics(GRAPHICS_FUNC_ARGS)
-int Element_PLNT::graphics(GRAPHICS_FUNC_ARGS)
+static int graphics(GRAPHICS_FUNC_ARGS)
 {
 	float maxtemp = std::max((float)cpart->tmp2, cpart->temp);
 	if (maxtemp > 300)
@@ -138,6 +146,3 @@ int Element_PLNT::graphics(GRAPHICS_FUNC_ARGS)
 	}
 	return 0;
 }
-
-
-Element_PLNT::~Element_PLNT() {}
