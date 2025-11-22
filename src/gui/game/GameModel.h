@@ -1,18 +1,11 @@
 #pragma once
-#include "gui/interface/Colour.h"
-#include "client/User.h"
-#include "gui/interface/Point.h"
-#include "graphics/RendererSettings.h"
-#include "simulation/CustomGOLData.h"
-#include "simulation/SimulationSettings.h"
-#include <vector>
 #include <deque>
 #include <memory>
-#include <optional>
-#include <functional>
-#include <array>
-
-constexpr auto NUM_TOOLINDICES = 4;
+#include <vector>
+#include "client/User.h"
+#include "graphics/Renderer.h"
+#include "gui/interface/Colour.h"
+#include "gui/interface/Point.h"
 
 class Menu;
 class Tool;
@@ -24,15 +17,9 @@ class GameController;
 class SaveInfo;
 class SaveFile;
 class Simulation;
-class Renderer;
 class Snapshot;
 struct SnapshotDelta;
 class GameSave;
-
-namespace http
-{
-	class ExecVoteRequest;
-};
 
 class ToolSelection
 {
@@ -53,43 +40,35 @@ struct HistoryEntry
 
 class GameModel
 {
-
 private:
 	std::vector<Notification*> notifications;
-	std::unique_ptr<GameSave> placeSave;
-	std::unique_ptr<GameSave> transformedPlaceSave;
+	//int clipboardSize;
+	//unsigned char * clipboardData;
+	GameSave * clipboard;
+	GameSave * placeSave;
 	std::deque<String> consoleLog;
 	std::vector<GameView*> observers;
+	std::vector<Tool*> toolList;
 
-	std::vector<std::unique_ptr<Tool>> tools;
-
-	void SanitizeToolsets();
-	void DeselectTool(ByteString identifier);
-	void InitTools();
+	//All tools that are associated with elements
+	std::vector<Tool*> elementTools;
+	//Tools that are present in elementTools, but don't have an associated menu and need to be freed manually
+	std::vector<Tool*> extraElementTools;
 
 	Simulation * sim;
-	bool paused = false;
-	int queuedFrames = 0;
 	Renderer * ren;
-	RendererSettings rendererSettings;
-	std::vector<std::unique_ptr<Menu>> menuList;
+	std::vector<Menu*> menuList;
 	std::vector<QuickOption*> quickOptions;
 	int activeMenu;
 	int currentBrush;
 	std::vector<std::unique_ptr<Brush>> brushList;
-	struct SaveInfoWrapper
-	{
-		std::unique_ptr<SaveInfo> saveInfo;
-		std::optional<int> queuedVote;
-		std::unique_ptr<http::ExecVoteRequest> execVoteRequest;
-	};
-	SaveInfoWrapper currentSave;
-	std::unique_ptr<SaveFile> currentFile;
-	Tool *lastTool = nullptr;
-	Tool **activeTools = nullptr;
-	std::array<Tool *, NUM_TOOLINDICES> decoToolset;
-	std::array<Tool *, NUM_TOOLINDICES> regularToolset;
-	std::optional<User> currentUser;
+	SaveInfo * currentSave;
+	SaveFile * currentFile;
+	Tool * lastTool;
+	Tool ** activeTools;
+	Tool * decoToolset[4];
+	Tool * regularToolset[4];
+	User currentUser;
 	float toolStrength;
 	std::deque<HistoryEntry> history;
 	std::unique_ptr<Snapshot> historyCurrent;
@@ -98,7 +77,7 @@ private:
 	bool mouseClickRequired;
 	bool includePressure;
 	bool perfectCircle = true;
-	TempScale temperatureScale;
+	int temperatureScale;
 
 	size_t activeColourPreset;
 	std::vector<ui::Colour> colourPresets;
@@ -107,12 +86,18 @@ private:
 
 	int edgeMode;
 	float ambientAirTemp;
-	float vorticityCoeff;
 	int decoSpace;
 
 	String infoTip;
 	String toolTip;
-	//bool zoomEnabled;
+	
+	Renderer::ZoomSettings zoomSettings = {
+		Vec2<int>::Zero,
+		32,
+		8,
+		Vec2<int>::Zero,
+	};
+
 	void notifyRendererChanged();
 	void notifySimulationChanged();
 	void notifyPausedChanged();
@@ -120,13 +105,12 @@ private:
 	void notifySaveChanged();
 	void notifyBrushChanged();
 	void notifyMenuListChanged();
-	void notifyActiveMenuToolListChanged();
+	void notifyToolListChanged();
 	void notifyActiveToolsChanged();
 	void notifyUserChanged();
 	void notifyZoomChanged();
 	void notifyClipboardChanged();
 	void notifyPlaceSaveChanged();
-	void notifyTransformedPlaceSaveChanged();
 	void notifyColourSelectorColourChanged();
 	void notifyColourSelectorVisibilityChanged();
 	void notifyColourPresetsChanged();
@@ -137,37 +121,19 @@ private:
 	void notifyToolTipChanged();
 	void notifyQuickOptionsChanged();
 	void notifyLastToolChanged();
-
-	void SaveToSimParameters(const GameSave &saveData);
-
-	bool threadedRendering = false;
-
-	GameView *view;
-
 public:
-	GameModel(GameView *newView);
+	GameModel();
 	~GameModel();
-
-	void Tick();
-
-	Tool *GetToolByIndex(int index);
 
 	void SetEdgeMode(int edgeMode);
 	int GetEdgeMode();
-	void SetTemperatureScale(TempScale temperatureScale);
-	inline TempScale GetTemperatureScale() const
+	void SetTemperatureScale(int temperatureScale);
+	inline int GetTemperatureScale() const
 	{
 		return temperatureScale;
 	}
-	void SetThreadedRendering(bool newThreadedRendering);
-	bool GetThreadedRendering() const
-	{
-		return threadedRendering;
-	}
 	void SetAmbientAirTemperature(float ambientAirTemp);
 	float GetAmbientAirTemperature();
-	void SetVorticityCoeff(float vorticityCoeff);
-	float GetVorticityCoeff();
 	void SetDecoSpace(int decoSpace);
 	int GetDecoSpace();
 
@@ -190,6 +156,7 @@ public:
 	String GetInfoTip();
 
 	void BuildMenus();
+	void BuildFavoritesMenu();
 	void BuildBrushList();
 	void BuildQuickOptionMenu(GameController * controller);
 
@@ -211,40 +178,24 @@ public:
 	Tool * GetLastTool();
 	void SetLastTool(Tool * newTool);
 	Tool *GetToolFromIdentifier(ByteString const &identifier);
-	std::optional<int> GetToolIndex(Tool *tool);
-	std::vector<Tool *> GetActiveMenuToolList();
-	void AllocTool(std::unique_ptr<Tool> tool);
-	void AllocElementTool(int element);
-	void UpdateElementTool(int element);
-	void AllocCustomGolTool(const CustomGOLData &gd);
-	void FreeTool(Tool *tool);
-
-	const std::vector<std::unique_ptr<Tool>> &GetTools()
-	{
-		return tools;
-	}
+	Tool * GetElementTool(int elementID);
+	std::vector<Tool*> GetToolList();
+	std::vector<Tool*> GetUnlistedTools();
 
 	Brush &GetBrush();
 	Brush *GetBrushByID(int i);
 	int GetBrushID();
-	int GetBrushIndex(const Brush &brush);
-	int BrushListSize() const
-	{
-		return int(brushList.size());
-	}
 	void SetBrushID(int i);
 
 	void SetVote(int direction);
-	SaveInfo *GetSave(); // non-owning
-	std::unique_ptr<SaveInfo> TakeSave();
-	const SaveFile *GetSaveFile() const;
-	std::unique_ptr<SaveFile> TakeSaveFile();
-	void SetSave(std::unique_ptr<SaveInfo> newSave, bool invertIncludePressure);
-	void SetSaveFile(std::unique_ptr<SaveFile> newSave, bool invertIncludePressure);
+	SaveInfo * GetSave();
+	SaveFile * GetSaveFile();
+	void SetSave(SaveInfo * newSave, bool invertIncludePressure);
+	void SetSaveFile(SaveFile * newSave, bool invertIncludePressure);
 	void AddObserver(GameView * observer);
 
 	void SetPaused(bool pauseState);
-	bool GetPaused() const;
+	bool GetPaused();
 	void SetDecoration(bool decorationState);
 	bool GetDecoration();
 	void SetAHeatEnable(bool aHeat);
@@ -260,37 +211,28 @@ public:
 	void SetActiveMenu(int menuID);
 	int GetActiveMenu();
 	void FrameStep(int frames);
-	const std::optional<User> &GetUser() const;
-	void SetUser(std::optional<User> user);
+	User GetUser();
+	void SetUser(User user);
 	Simulation * GetSimulation();
 	Renderer * GetRenderer();
-	RendererSettings &GetRendererSettings()
-	{
-		return rendererSettings;
-	}
-	void SetZoomEnabled(bool enabled);
-	bool GetZoomEnabled();
-	void SetZoomSize(int size);
-	int GetZoomSize();
-	void SetZoomFactor(int factor);
-	int GetZoomFactor();
-	void SetZoomPosition(ui::Point position);
-	ui::Point GetZoomPosition();
-	bool MouseInZoom(ui::Point position);
-	ui::Point AdjustZoomCoords(ui::Point position);
-	void SetZoomWindowPosition(ui::Point position);
-	ui::Point GetZoomWindowPosition();
-	void SetClipboard(std::unique_ptr<GameSave> save);
-	void SetPlaceSave(std::unique_ptr<GameSave> save);
-	void TransformPlaceSave(Mat2<int> transform, Vec2<int> nudge);
-
-	std::function<void (String)> logSink;
+	void SetZoomEnabled(bool);
+	bool GetZoomEnabled() const;
+	void SetZoomScopeSize(int);
+	int GetZoomScopeSize() const;
+	void SetZoomFactor(int);
+	int GetZoomFactor() const;
+	void SetZoomScopePosition(Vec2<int>);
+	Vec2<int> GetZoomScopePosition() const;
+	void SetZoomWindowPosition(Vec2<int>);
+	Vec2<int> GetZoomWindowPosition() const;
+	bool MouseInZoom(Vec2<int>) const;
+	Vec2<int> AdjustZoomCoords(Vec2<int>) const;
+	void SetClipboard(GameSave * save);
+	void SetPlaceSave(GameSave * save);
 	void Log(String message, bool printToFile);
-
 	std::deque<String> GetLog();
-	const GameSave *GetClipboard() const;
-	const GameSave *GetPlaceSave() const;
-	const GameSave *GetTransformedPlaceSave() const;
+	GameSave * GetClipboard();
+	GameSave * GetPlaceSave();
 	bool GetMouseClickRequired();
 	void SetMouseClickRequired(bool mouseClickRequired);
 	bool GetIncludePressure();
@@ -305,11 +247,7 @@ public:
 	void AddNotification(Notification * notification);
 	void RemoveNotification(Notification * notification);
 
-	bool AddCustomGol(String ruleString, String nameString, RGB color1, RGB color2);
-	bool RemoveCustomGol(const ByteString &identifier);
-	void LoadCustomGol();
-	void SaveCustomGol();
-	std::optional<CustomGOLData> CheckCustomGol(String ruleString, String nameString, RGB color1, RGB color2);
+	bool RemoveCustomGOLType(const ByteString &identifier);
 
 	ByteString SelectNextIdentifier;
 	int SelectNextTool;
@@ -317,22 +255,4 @@ public:
 	void UpdateUpTo(int upTo);
 	void BeforeSim();
 	void AfterSim();
-
-	GameView *GetView() const
-	{
-		return view;
-	}
-
-	int GetQueuedFrames() const
-	{
-		return queuedFrames;
-	}
-	void SetQueuedFrames(int newQueuedFrames)
-	{
-		queuedFrames = newQueuedFrames;
-	}
-	bool IsSimRunning() const
-	{
-		return !paused || queuedFrames;
-	}
 };
