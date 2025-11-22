@@ -1,14 +1,14 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_VOID PT_VOID 22
-Element_VOID::Element_VOID()
+#include "simulation/ElementCommon.h"
+
+void Element::Element_VOID()
 {
 	Identifier = "DEFAULT_PT_VOID";
 	Name = "VOID";
-	Colour = PIXPACK(0x790B0B);
+	Colour = 0x790B0B_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_SPECIAL;
 	Enabled = 1;
-	
+
 	Advection = 0.0f;
 	AirDrag = 0.00f * CFDS;
 	AirLoss = 1.00f;
@@ -18,21 +18,19 @@ Element_VOID::Element_VOID()
 	Diffusion = 0.00f;
 	HotAir = -0.0003f* CFDS;
 	Falldown = 0;
-	
+
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 0;
 	Hardness = 0;
-	
+
 	Weight = 100;
-	
-	Temperature = R_TEMP+0.0f	+273.15f;
+
 	HeatConduct = 251;
 	Description = "Hole, will drain away any particles.";
-	
-	State = ST_SOLID;
+
 	Properties = TYPE_SOLID;
-	
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;
@@ -41,9 +39,5 @@ Element_VOID::Element_VOID()
 	LowTemperatureTransition = NT;
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
-	
-	Update = NULL;
-	
+	CtypeDraw = &Element::basicCtypeDraw;
 }
-
-Element_VOID::~Element_VOID() {}

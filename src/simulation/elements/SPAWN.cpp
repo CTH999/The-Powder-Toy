@@ -1,14 +1,17 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_SPAWN PT_SPAWN 118
-Element_SPAWN::Element_SPAWN()
+#include "simulation/ElementCommon.h"
+
+static bool createAllowed(ELEMENT_CREATE_ALLOWED_FUNC_ARGS);
+static void changeType(ELEMENT_CHANGETYPE_FUNC_ARGS);
+
+void Element::Element_SPAWN()
 {
 	Identifier = "DEFAULT_PT_SPAWN";
 	Name = "SPWN";
-	Colour = PIXPACK(0xAAAAAA);
+	Colour = 0xAAAAAA_rgb;
 	MenuVisible = 0;
 	MenuSection = SC_SOLIDS;
 	Enabled = 1;
-	
+
 	Advection = 0.0f;
 	AirDrag = 0.00f * CFDS;
 	AirLoss = 1.00f;
@@ -18,21 +21,19 @@ Element_SPAWN::Element_SPAWN()
 	Diffusion = 0.00f;
 	HotAir = 0.000f	* CFDS;
 	Falldown = 0;
-	
+
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 0;
 	Hardness = 1;
-	
+
 	Weight = 100;
-	
-	Temperature = R_TEMP+273.15f;
+
 	HeatConduct = 0;
 	Description = "STKM spawn point.";
-	
-	State = ST_SOLID;
+
 	Properties = TYPE_SOLID;
-	
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;
@@ -41,9 +42,26 @@ Element_SPAWN::Element_SPAWN()
 	LowTemperatureTransition = NT;
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
-	
-	Update = NULL;
-	
+
+	CreateAllowed = &createAllowed;
+	ChangeType = &changeType;
 }
 
-Element_SPAWN::~Element_SPAWN() {}
+static bool createAllowed(ELEMENT_CREATE_ALLOWED_FUNC_ARGS)
+{
+	return sim->player.spawnID == -1;
+}
+
+static void changeType(ELEMENT_CHANGETYPE_FUNC_ARGS)
+{
+	if (to == PT_SPAWN)
+	{
+		if (sim->player.spawnID == -1)
+			sim->player.spawnID = i;
+	}
+	else
+	{
+		if (sim->player.spawnID == i)
+			sim->player.spawnID = -1;
+	}
+}

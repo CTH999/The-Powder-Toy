@@ -1,14 +1,17 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_HSWC PT_HSWC 75
-Element_HSWC::Element_HSWC()
+#include "simulation/ElementCommon.h"
+
+static int update(UPDATE_FUNC_ARGS);
+static int graphics(GRAPHICS_FUNC_ARGS);
+
+void Element::Element_HSWC()
 {
 	Identifier = "DEFAULT_PT_HSWC";
 	Name = "HSWC";
-	Colour = PIXPACK(0x3B0A0A);
+	Colour = 0x3B0A0A_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_POWERED;
 	Enabled = 1;
-	
+
 	Advection = 0.0f;
 	AirDrag = 0.00f * CFDS;
 	AirLoss = 0.90f;
@@ -18,21 +21,19 @@ Element_HSWC::Element_HSWC()
 	Diffusion = 0.00f;
 	HotAir = 0.000f	* CFDS;
 	Falldown = 0;
-	
+
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 0;
 	Hardness = 1;
-	
+
 	Weight = 100;
-	
-	Temperature = R_TEMP+0.0f	+273.15f;
+
 	HeatConduct = 251;
 	Description = "Heat switch. Conducts heat only when activated.";
-	
-	State = ST_NONE;
+
 	Properties = TYPE_SOLID;
-	
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;
@@ -41,15 +42,13 @@ Element_HSWC::Element_HSWC()
 	LowTemperatureTransition = NT;
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
-	
-	Update = &Element_HSWC::update;
-	Graphics = &Element_HSWC::graphics;
+
+	Update = &update;
+	Graphics = &graphics;
 }
 
-//#TPT-Directive ElementHeader Element_HSWC static int update(UPDATE_FUNC_ARGS)
-int Element_HSWC::update(UPDATE_FUNC_ARGS)
- {
-	int r, rx, ry;
+static int update(UPDATE_FUNC_ARGS)
+{
 	if (parts[i].life!=10)
 	{
 		if (parts[i].life>0)
@@ -57,34 +56,44 @@ int Element_HSWC::update(UPDATE_FUNC_ARGS)
 	}
 	else
 	{
-		for (rx=-2; rx<3; rx++)
-			for (ry=-2; ry<3; ry++)
-				if (BOUNDS_CHECK && (rx || ry))
+		bool deserializeTemp = parts[i].tmp == 1;
+		for (auto rx = -2; rx <= 2; rx++)
+		{
+			for (auto ry = -2; ry <= 2; ry++)
+			{
+				if (rx || ry)
 				{
-					r = pmap[y+ry][x+rx];
+					auto r = pmap[y+ry][x+rx];
+					if (!r)
+						r = sim->photons[y+ry][x+rx];
 					if (!r)
 						continue;
-					if ((r&0xFF)==PT_HSWC)
+					if (TYP(r) == PT_HSWC)
 					{
-						if (parts[r>>8].life<10&&parts[r>>8].life>0)
+						if (parts[ID(r)].life<10&&parts[ID(r)].life>0)
 							parts[i].life = 9;
-						else if (parts[r>>8].life==0)
-							parts[r>>8].life = 10;
+						else if (parts[ID(r)].life==0)
+							parts[ID(r)].life = 10;
+					}
+					if (deserializeTemp && TYP(r) == PT_FILT)
+					{
+						if (rx >= -1 && rx <= 1 && ry >= -1 && ry <= 1)
+						{
+							int newTemp = parts[ID(r)].ctype - 0x10000000;
+							if (newTemp >= MIN_TEMP && newTemp <= MAX_TEMP)
+								parts[i].temp = float(parts[ID(r)].ctype - 0x10000000);
+						}
 					}
 				}
+			}
+		}
 	}
 	return 0;
 }
 
-
-//#TPT-Directive ElementHeader Element_HSWC static int graphics(GRAPHICS_FUNC_ARGS)
-int Element_HSWC::graphics(GRAPHICS_FUNC_ARGS)
-
+static int graphics(GRAPHICS_FUNC_ARGS)
 {
 	int lifemod = ((cpart->life>10?10:cpart->life)*19);
 	*colr += lifemod;
 	return 0;
 }
-
-
-Element_HSWC::~Element_HSWC() {}

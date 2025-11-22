@@ -1,51 +1,87 @@
 #include "LoginModel.h"
+#include "LoginView.h"
+#include "Config.h"
+#include "client/Client.h"
+#include "client/http/LoginRequest.h"
+#include "client/http/LogoutRequest.h"
 
-LoginModel::LoginModel():
-	currentUser(0, "")
+void LoginModel::Login(ByteString username, ByteString password)
 {
-
+	if (username.Contains("@"))
+	{
+		statusText = String::Build("Use your Powder Toy account to log in, not your email. If you don't have a Powder Toy account, you can create one at ", SERVER, "/Register.html");
+		loginStatus = loginIdle;
+		notifyStatusChanged();
+		return;
+	}
+	statusText = "Logging in...";
+	loginStatus = loginWorking;
+	notifyStatusChanged();
+	loginRequest = std::make_unique<http::LoginRequest>(username, password);
+	loginRequest->Start();
 }
 
-void LoginModel::Login(string username, string password)
+void LoginModel::Logout()
 {
-	statusText = "Logging in...";
-	loginStatus = false;
+	statusText = "Logging out...";
+	loginStatus = loginWorking;
 	notifyStatusChanged();
-	LoginStatus status = Client::Ref().Login(username, password, currentUser);
-	switch(status)
-	{
-	case LoginOkay:
-		statusText = "Logged in";
-		loginStatus = true;
-		break;
-	case LoginError:
-		statusText = Client::Ref().GetLastError();
-		size_t banStart = statusText.find(". Ban expire in"); //TODO: temporary, remove this when the ban message is fixed
-		if (banStart != statusText.npos)
-			statusText.replace(banStart, 15, ". Login at http://powdertoy.co.uk in order to see the full ban reason. Ban expires in");
-		break;
-	}
-	notifyStatusChanged();
+	logoutRequest = std::make_unique<http::LogoutRequest>();
+	logoutRequest->Start();
 }
 
 void LoginModel::AddObserver(LoginView * observer)
 {
 	observers.push_back(observer);
+	notifyStatusChanged();
 }
 
-string LoginModel::GetStatusText()
+String LoginModel::GetStatusText()
 {
 	return statusText;
 }
 
-User LoginModel::GetUser()
+void LoginModel::Tick()
 {
-	return currentUser;
-}
-
-bool LoginModel::GetStatus()
-{
-	return loginStatus;
+	if (loginRequest && loginRequest->CheckDone())
+	{
+		try
+		{
+			auto info = loginRequest->Finish();
+			auto &client = Client::Ref();
+			client.SetAuthUser(info.user);
+			for (auto &item : info.notifications)
+			{
+				client.AddServerNotification(item);
+			}
+			statusText = "Logged in";
+			loginStatus = loginSucceeded;
+		}
+		catch (const http::RequestError &ex)
+		{
+			statusText = ByteString(ex.what()).FromUtf8();
+			loginStatus = loginIdle;
+		}
+		notifyStatusChanged();
+		loginRequest.reset();
+	}
+	if (logoutRequest && logoutRequest->CheckDone())
+	{
+		try
+		{
+			logoutRequest->Finish();
+			auto &client = Client::Ref();
+			client.SetAuthUser(std::nullopt);
+			statusText = "Logged out";
+		}
+		catch (const http::RequestError &ex)
+		{
+			statusText = ByteString(ex.what()).FromUtf8();
+		}
+		loginStatus = loginIdle;
+		notifyStatusChanged();
+		logoutRequest.reset();
+	}
 }
 
 void LoginModel::notifyStatusChanged()
@@ -56,6 +92,7 @@ void LoginModel::notifyStatusChanged()
 	}
 }
 
-LoginModel::~LoginModel() {
+LoginModel::~LoginModel()
+{
+	// Satisfy std::unique_ptr
 }
-

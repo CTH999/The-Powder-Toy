@@ -1,14 +1,16 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_BREC PT_BREC 135
-Element_BREC::Element_BREC()
+#include "simulation/ElementCommon.h"
+
+static int update(UPDATE_FUNC_ARGS);
+
+void Element::Element_BREC()
 {
 	Identifier = "DEFAULT_PT_BREC";
 	Name = "BREL";
-	Colour = PIXPACK(0x707060);
+	Colour = 0x707060_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_POWDERS;
 	Enabled = 1;
-	
+
 	Advection = 0.4f;
 	AirDrag = 0.04f * CFDS;
 	AirLoss = 0.94f;
@@ -18,21 +20,19 @@ Element_BREC::Element_BREC()
 	Diffusion = 0.00f;
 	HotAir = 0.000f	* CFDS;
 	Falldown = 1;
-	
+
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 2;
 	Hardness = 2;
-	
+
 	Weight = 90;
-	
-	Temperature = R_TEMP+0.0f	+273.15f;
+
 	HeatConduct = 211;
 	Description = "Broken electronics. Formed from EMP blasts, and when constantly sparked while under pressure, turns to EXOT.";
-	
-	State = ST_SOLID;
+
 	Properties = TYPE_PART|PROP_CONDUCTS|PROP_LIFE_DEC|PROP_HOT_GLOW;
-	
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;
@@ -41,44 +41,24 @@ Element_BREC::Element_BREC()
 	LowTemperatureTransition = NT;
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
-	
-	Update = &Element_BREC::update;
-	
+
+	Update = &update;
 }
 
-//#TPT-Directive ElementHeader Element_BREC static int update(UPDATE_FUNC_ARGS)
-int Element_BREC::update(UPDATE_FUNC_ARGS)
+static int update(UPDATE_FUNC_ARGS)
 {
 	if (parts[i].life)
 	{
-		if (sim->pv[y/CELL][x/CELL]>10.0f) 
+		if (sim->pv[y/CELL][x/CELL]>10.0f)
 		{
-			if (parts[i].temp>9000 && sim->pv[y/CELL][x/CELL]>30.0f && !(rand()%200))
+			if (parts[i].temp>9000 && sim->pv[y/CELL][x/CELL]>30.0f && sim->rng.chance(1, 200))
 			{
 				sim->part_change_type(i, x ,y ,PT_EXOT);
 				parts[i].life = 1000;
 			}
 			parts[i].temp += (sim->pv[y/CELL][x/CELL])/8;
 		}
-		
+
 	}
-	for (int rx = -1; rx <= 1; rx++)
-		for (int ry = -1; ry <= 1; ry++)
-		{
-			if (rx || ry)
-			{
-				int r = pmap[y+ry][x+rx];
-				if (!r)
-					continue;
-				if ((r&0xFF) == PT_LAVA && parts[r>>8].ctype == PT_CLST)
-				{
-					float pres = std::max(sim->pv[y/CELL][x/CELL]*10.0f, 0.0f);
-					if (parts[r>>8].temp >= pres+sim->elements[PT_CRMC].HighTemperature+50.0f)
-						parts[r>>8].ctype = PT_CRMC;
-				}
-			}
-		}
 	return 0;
 }
-
-Element_BREC::~Element_BREC() {}

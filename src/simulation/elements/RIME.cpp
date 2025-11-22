@@ -1,14 +1,16 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_RIME PT_RIME 91
-Element_RIME::Element_RIME()
+#include "simulation/ElementCommon.h"
+
+static int update(UPDATE_FUNC_ARGS);
+
+void Element::Element_RIME()
 {
 	Identifier = "DEFAULT_PT_RIME";
 	Name = "RIME";
-	Colour = PIXPACK(0xCCCCCC);
+	Colour = 0xCCCCCC_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_SOLIDS;
 	Enabled = 1;
-	
+
 	Advection = 0.00f;
 	AirDrag = 0.00f * CFDS;
 	AirLoss = 0.00f;
@@ -18,21 +20,20 @@ Element_RIME::Element_RIME()
 	Diffusion = 0.00f;
 	HotAir = 0.000f  * CFDS;
 	Falldown = 0;
-	
+
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 0;
-	Hardness = 30;
-	
+	Hardness = 32;
+
 	Weight = 100;
-	
-	Temperature = 243.15f;
+
+	DefaultProperties.temp = -30.0f + 273.15f;
 	HeatConduct = 100;
-	Description = "Solid, created when steam cools rapidly and goes through sublimation.";
-	
-	State = ST_SOLID;
+	Description = "Solid, created when steam cools rapidly and goes through deposition, skipping the liquid phase.";
+
 	Properties = TYPE_SOLID;
-	
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;
@@ -40,36 +41,39 @@ Element_RIME::Element_RIME()
 	LowTemperature = ITL;
 	LowTemperatureTransition = NT;
 	HighTemperature = 273.15f;
-	HighTemperatureTransition = PT_WATR;
-	
-	Update = &Element_RIME::update;
-	
+	HighTemperatureTransition = ST;
+
+	Update = &update;
 }
 
-//#TPT-Directive ElementHeader Element_RIME static int update(UPDATE_FUNC_ARGS)
-int Element_RIME::update(UPDATE_FUNC_ARGS)
- {
-	int r, rx, ry;
-	for (rx=-1; rx<2; rx++)
-		for (ry=-1; ry<2; ry++)
-			if (BOUNDS_CHECK && (rx || ry))
+static int update(UPDATE_FUNC_ARGS)
+{
+	for (auto rx = -1; rx <= 1; rx++)
+	{
+		for (auto ry = -1; ry <= 1; ry++)
+		{
+			if (rx || ry)
 			{
-				r = pmap[y+ry][x+rx];
+				auto r = pmap[y+ry][x+rx];
 				if (!r)
 					continue;
-				if ((r&0xFF)==PT_SPRK)
+				if (TYP(r)==PT_SPRK)
 				{
 					sim->part_change_type(i,x,y,PT_FOG);
-					parts[i].life = rand()%50 + 60;
+					parts[i].life = sim->rng.between(60, 119);
 				}
-				else if ((r&0xFF)==PT_FOG&&parts[r>>8].life>0)
+				else if (TYP(r) == PT_GAS && parts[i].tmp < 10)
+				{
+					sim->kill_part(ID(r));
+					parts[i].tmp++;
+				}
+				else if (TYP(r)==PT_FOG&&parts[ID(r)].life>0)
 				{
 					sim->part_change_type(i,x,y,PT_FOG);
-					parts[i].life = parts[r>>8].life;
+					parts[i].life = parts[ID(r)].life;
 				}
 			}
+		}
+	}
 	return 0;
 }
-
-
-Element_RIME::~Element_RIME() {}

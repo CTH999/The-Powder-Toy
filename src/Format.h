@@ -1,37 +1,34 @@
 #pragma once
-
-#include <sstream>
+#include <memory>
+#include <span>
 #include <vector>
+#include <map>
+#include "common/String.h"
+#include "common/Plane.h"
+#include "graphics/Pixel.h"
+#include "simulation/SimulationSettings.h"
 
 class VideoBuffer;
 
 namespace format
 {
-	const static char hex[] = "0123456789ABCDEF";
-
-	template <typename T> std::string NumberToString(T number)
+	struct Url
 	{
-		std::stringstream ss;
-		ss << number;
-		return ss.str();
-	}
+		ByteString base;
+		std::map<ByteString, ByteString> params;
 
-	template <typename T> T StringToNumber(const std::string & text)
-	{
-		std::stringstream ss(text);
-		T number;
-		return (ss >> number)?number:0;
-	}
+		ByteString ToByteString() const;
+	};
 
-	std::string URLEncode(std::string value);
-	std::string UnixtimeToDate(time_t unixtime, std::string dateFomat = "%d %b %Y");
-	std::string UnixtimeToDateMini(time_t unixtime);
-	std::string CleanString(std::string dirtyString, bool ascii, bool color, bool newlines, bool numeric = false);
-	std::string CleanString(const char * dirtyData, bool ascii, bool color, bool newlines, bool numeric = false);
-	std::vector<char> VideoBufferToPNG(const VideoBuffer & vidBuf);
-	std::vector<char> VideoBufferToBMP(const VideoBuffer & vidBuf);
-	std::vector<char> VideoBufferToPPM(const VideoBuffer & vidBuf);
-	std::vector<char> VideoBufferToPTI(const VideoBuffer & vidBuf);
-	VideoBuffer * PTIToVideoBuffer(std::vector<char> & data);
-	unsigned long CalculateCRC(unsigned char * data, int length);
+	ByteString URLEncode(ByteString value);
+	ByteString URLDecode(ByteString value);
+	ByteString UnixtimeToDate(time_t unixtime, ByteString dateFomat = ByteString("%d %b %Y"), bool local = true);
+	ByteString UnixtimeToDateMini(time_t unixtime);
+	String CleanString(String dirtyString, bool ascii, bool color, bool newlines, bool numeric = false);
+	std::vector<char> PixelsToPPM(PlaneAdapter<std::vector<pixel>> const &);
+	std::unique_ptr<std::vector<char>> PixelsToPNG(PlaneAdapter<std::vector<pixel>> const &);
+	std::unique_ptr<PlaneAdapter<std::vector<pixel_rgba>>> PixelsFromPNG(std::span<const char> data);
+	std::unique_ptr<PlaneAdapter<std::vector<pixel>>> PixelsFromPNG(std::span<const char> data, RGB background);
+	void RenderTemperature(StringBuilder &sb, float temp, TempScale scale);
+	float StringToTemperature(String str, TempScale defaultScale);
 }

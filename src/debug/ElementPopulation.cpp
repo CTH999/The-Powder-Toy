@@ -1,7 +1,8 @@
 #include "ElementPopulation.h"
 #include "gui/interface/Engine.h"
 #include "simulation/Simulation.h"
-#include "Format.h"
+#include "simulation/SimulationData.h"
+#include "graphics/Graphics.h"
 
 ElementPopulationDebug::ElementPopulationDebug(unsigned int id, Simulation * sim):
 	DebugInfo(id),
@@ -13,13 +14,15 @@ ElementPopulationDebug::ElementPopulationDebug(unsigned int id, Simulation * sim
 
 void ElementPopulationDebug::Draw()
 {
+	auto &sd = SimulationData::CRef();
+	auto &elements = sd.elements;
 	Graphics * g = ui::Engine::Ref().g;
 
 	int yBottom = YRES-10;
 	int xStart = 10;
 
-	std::string maxValString;
-	std::string halfValString;
+	String maxValString;
+	String halfValString;
 
 
 	float maxVal = 255;
@@ -27,53 +30,55 @@ void ElementPopulationDebug::Draw()
 	int bars = 0;
 	for(int i = 0; i < PT_NUM; i++)
 	{
-		if(sim->elements[i].Enabled)
+		if(elements[i].Enabled)
 		{
 			if(maxVal < sim->elementCount[i])
-				maxVal = sim->elementCount[i];
+				maxVal = float(sim->elementCount[i]);
 			bars++;
 		}
 	}
 	maxAverage = (maxAverage*(1.0f-0.015f)) + (0.015f*maxVal);
 	scale = 255.0f/maxAverage;
 
-	maxValString = format::NumberToString<int>(maxAverage);
-	halfValString = format::NumberToString<int>(maxAverage/2);
-	
+	maxValString = String::Build(maxAverage);
+	halfValString = String::Build(maxAverage/2);
 
-	g->fillrect(xStart-5, yBottom - 263, bars+10+Graphics::textwidth(maxValString.c_str())+10, 255 + 13, 0, 0, 0, 180);
+
+	g->BlendFilledRect(RectSized(Vec2{ xStart-5, yBottom - 263 }, Vec2{ bars+10+Graphics::TextSize(maxValString).X+9, 255 + 13 }), 0x000000_rgb .WithAlpha(180));
 
 	bars = 0;
 	for(int i = 0; i < PT_NUM; i++)
 	{
-		if(sim->elements[i].Enabled)
+		if(elements[i].Enabled)
 		{
-			float count = sim->elementCount[i];
-			int barSize = (count * scale - 0.5f);
+			auto count = sim->elementCount[i];
+			auto barSize = int(count * scale - 0.5f);
 			int barX = bars;//*2;
 
-			g->draw_line(xStart+barX, yBottom+3, xStart+barX, yBottom+2, PIXR(sim->elements[i].Colour), PIXG(sim->elements[i].Colour), PIXB(sim->elements[i].Colour), 255);
-			if(sim->elementCount[i])	
+			RGB colour = elements[i].Colour;
+
+			g->DrawLine({ xStart+barX, yBottom+3 }, { xStart+barX, yBottom+2 }, colour);
+			if(sim->elementCount[i])
 			{
 				if(barSize > 256)
 				{
 					barSize = 256;
-					g->blendpixel(xStart+barX, yBottom-barSize-3, PIXR(sim->elements[i].Colour), PIXG(sim->elements[i].Colour), PIXB(sim->elements[i].Colour), 255);
-					g->blendpixel(xStart+barX, yBottom-barSize-5, PIXR(sim->elements[i].Colour), PIXG(sim->elements[i].Colour), PIXB(sim->elements[i].Colour), 255);
-					g->blendpixel(xStart+barX, yBottom-barSize-7, PIXR(sim->elements[i].Colour), PIXG(sim->elements[i].Colour), PIXB(sim->elements[i].Colour), 255);
-				} else {			
+					g->DrawPixel({ xStart+barX, yBottom-barSize-3 }, colour);
+					g->DrawPixel({ xStart+barX, yBottom-barSize-5 }, colour);
+					g->DrawPixel({ xStart+barX, yBottom-barSize-7 }, colour);
+				} else {
 
-					g->draw_line(xStart+barX, yBottom-barSize-3, xStart+barX, yBottom-barSize-2, 255, 255, 255, 180);
+					g->BlendLine({ xStart+barX, yBottom-barSize-3 }, { xStart+barX, yBottom-barSize-2 }, 0xFFFFFF_rgb .WithAlpha(180));
 				}
-				g->draw_line(xStart+barX, yBottom-barSize, xStart+barX, yBottom, PIXR(sim->elements[i].Colour), PIXG(sim->elements[i].Colour), PIXB(sim->elements[i].Colour), 255);
+				g->DrawLine({ xStart+barX, yBottom-barSize }, { xStart+barX, yBottom }, colour);
 			}
 			bars++;
 		}
 	}
 
-	g->drawtext(xStart + bars + 5, yBottom-5, "0", 255, 255, 255, 255);
-	g->drawtext(xStart + bars + 5, yBottom-132, halfValString, 255, 255, 255, 255);
-	g->drawtext(xStart + bars + 5, yBottom-260, maxValString, 255, 255, 255, 255);
+	g->BlendText({ xStart + bars + 5, yBottom-5 }, "0", 0xFFFFFF_rgb .WithAlpha(255));
+	g->BlendText({ xStart + bars + 5, yBottom-132 }, halfValString, 0xFFFFFF_rgb .WithAlpha(255));
+	g->BlendText({ xStart + bars + 5, yBottom-260 }, maxValString, 0xFFFFFF_rgb .WithAlpha(255));
 }
 
 ElementPopulationDebug::~ElementPopulationDebug()

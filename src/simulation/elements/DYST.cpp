@@ -1,14 +1,14 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_DYST PT_DYST 64
-Element_DYST::Element_DYST()
+#include "simulation/ElementCommon.h"
+
+void Element::Element_DYST()
 {
 	Identifier = "DEFAULT_PT_DYST";
 	Name = "DYST";
-	Colour = PIXPACK(0xBBB0A0);
+	Colour = 0xBBB0A0_rgb;
 	MenuVisible = 0;
 	MenuSection = SC_POWDERS;
 	Enabled = 1;
-	
+
 	Advection = 0.7f;
 	AirDrag = 0.02f * CFDS;
 	AirLoss = 0.96f;
@@ -18,21 +18,19 @@ Element_DYST::Element_DYST()
 	Diffusion = 0.00f;
 	HotAir = 0.000f	* CFDS;
 	Falldown = 1;
-	
+
 	Flammable = 20;
 	Explosive = 0;
 	Meltable = 0;
 	Hardness = 30;
-	
+
 	Weight = 80;
-	
-	Temperature = R_TEMP+0.0f	+273.15f;
+
 	HeatConduct = 70;
 	Description = "Dead Yeast.";
-	
-	State = ST_SOLID;
+
 	Properties = TYPE_PART;
-	
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;
@@ -41,9 +39,4 @@ Element_DYST::Element_DYST()
 	LowTemperatureTransition = NT;
 	HighTemperature = 473.0f;
 	HighTemperatureTransition = PT_DUST;
-	
-	Update = NULL;
-	
 }
-
-Element_DYST::~Element_DYST() {}

@@ -1,14 +1,16 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_IGNT PT_IGNT 140
-Element_IGNT::Element_IGNT()
+#include "simulation/ElementCommon.h"
+
+static int update(UPDATE_FUNC_ARGS);
+
+void Element::Element_IGNT()
 {
 	Identifier = "DEFAULT_PT_IGNT";
 	Name = "IGNC";
-	Colour = PIXPACK(0xC0B050);
+	Colour = 0xC0B050_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_EXPLOSIVE;
 	Enabled = 1;
-	
+
 	Advection = 0.0f;
 	AirDrag = 0.00f * CFDS;
 	AirLoss = 0.90f;
@@ -18,21 +20,19 @@ Element_IGNT::Element_IGNT()
 	Diffusion = 0.00f;
 	HotAir = 0.000f	* CFDS;
 	Falldown = 0;
-	
+
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 0;
 	Hardness = 1;
-	
+
 	Weight = 100;
-	
-	Temperature = R_TEMP+0.0f	+273.15f;
+
 	HeatConduct = 88;
 	Description = "Ignition cord. Burns slowly with fire and sparks.";
-	
-	State = ST_SOLID;
+
 	Properties = TYPE_SOLID | PROP_NEUTPENETRATE | PROP_SPARKSETTLE | PROP_LIFE_KILL;
-	
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;
@@ -41,52 +41,52 @@ Element_IGNT::Element_IGNT()
 	LowTemperatureTransition = NT;
 	HighTemperature = 673.0f;
 	HighTemperatureTransition = PT_FIRE;
-	
-	Update = &Element_IGNT::update;
-	
+
+	DefaultProperties.life = 3;
+
+	Update = &update;
 }
 
-//#TPT-Directive ElementHeader Element_IGNT static int update(UPDATE_FUNC_ARGS)
-int Element_IGNT::update(UPDATE_FUNC_ARGS)
- {
-	 int r, rx, ry, rt;
+static int update(UPDATE_FUNC_ARGS)
+{
 	if(parts[i].tmp==0)
 	{
-		for (rx=-1; rx<2; rx++)
-			for (ry=-1; ry<2; ry++)
-				if (BOUNDS_CHECK && (rx || ry))
+		for (auto rx = -1; rx <= 1; rx++)
+		{
+			for (auto ry = -1; ry <= 1; ry++)
+			{
+				if (rx || ry)
 				{
-					r = pmap[y+ry][x+rx];
+					auto r = pmap[y+ry][x+rx];
 					if (!r)
 						continue;
-					rt = r&0xFF;
-					if (rt==PT_FIRE || rt==PT_PLSM || rt==PT_SPRK || rt==PT_LIGH || (rt==PT_IGNT && parts[r>>8].life==1))
+					auto rt = TYP(r);
+					if (rt==PT_FIRE || rt==PT_PLSM || rt==PT_SPRK || rt==PT_LIGH || (rt==PT_IGNT && parts[ID(r)].life==1))
 					{
 						parts[i].tmp = 1;
 					}
 				}
+			}
+		}
 	}
 	else if(parts[i].life > 0)
 	{
-		if(rand()%3)
+		if (sim->rng.chance(2, 3))
 		{
-			int nb = sim->create_part(-1, x+rand()%3-1, y+rand()%3-1, PT_EMBR);
+			int nb = sim->create_part(-1, x + sim->rng.between(-1, 1), y + sim->rng.between(-1, 1), PT_EMBR);
 			if (nb!=-1) {
 				parts[nb].tmp = 0;
 				parts[nb].life = 30;
-				parts[nb].vx = rand()%20-10;
-				parts[nb].vy = rand()%20-10;
+				parts[nb].vx = float(sim->rng.between(-10, 10));
+				parts[nb].vy = float(sim->rng.between(-10, 10));
 				parts[nb].temp = restrict_flt(parts[i].temp-273.15f+400.0f, MIN_TEMP, MAX_TEMP);
 			}
 		}
 		else
 		{
-			sim->create_part(-1, x+rand()%3-1, y+rand()%3-1, PT_FIRE);
+			sim->create_part(-1, x + sim->rng.between(-1, 1), y + sim->rng.between(-1, 1), PT_FIRE);
 		}
 		parts[i].life--;
 	}
 	return 0;
 }
-
-
-Element_IGNT::~Element_IGNT() {}

@@ -1,14 +1,15 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_BVBR PT_BVBR 166
-Element_BVBR::Element_BVBR()
+#include "simulation/ElementCommon.h"
+#include "VIBR.h"
+
+void Element::Element_BVBR()
 {
 	Identifier = "DEFAULT_PT_BVBR";
 	Name = "BVBR";
-	Colour = PIXPACK(0x005000);
+	Colour = 0x005000_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_NUCLEAR;
 	Enabled = 1;
-	
+
 	Advection = 0.3f;
 	AirDrag = 0.02f * CFDS;
 	AirLoss = 0.95f;
@@ -18,21 +19,20 @@ Element_BVBR::Element_BVBR()
 	Diffusion = 0.00f;
 	HotAir = 0.0000f	* CFDS;
 	Falldown = 1;
-	
+
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 0;
 	Hardness = 0;
-	
+
 	Weight = 67;
-	
-	Temperature = 273.15f;
+
+	DefaultProperties.temp = 273.15f;
 	HeatConduct = 164;
 	Description = "Broken vibranium.";
-	
-	State = ST_SOLID;
+
 	Properties = TYPE_PART|PROP_LIFE_DEC;
-	
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;
@@ -41,10 +41,7 @@ Element_BVBR::Element_BVBR()
 	LowTemperatureTransition = NT;
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
-	
-	Update = &Element_VIBR::update;
-	Graphics = &Element_VIBR::graphics;
-	
-}
 
-Element_BVBR::~Element_BVBR() {}
+	Update = &Element_VIBR_update;
+	Graphics = &Element_VIBR_graphics;
+}

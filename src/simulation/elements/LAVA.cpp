@@ -1,14 +1,18 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_LAVA PT_LAVA 6
-Element_LAVA::Element_LAVA()
+#include "simulation/ElementCommon.h"
+#include "FIRE.h"
+
+static int graphics(GRAPHICS_FUNC_ARGS);
+static void create(ELEMENT_CREATE_FUNC_ARGS);
+
+void Element::Element_LAVA()
 {
 	Identifier = "DEFAULT_PT_LAVA";
 	Name = "LAVA";
-	Colour = PIXPACK(0xE05010);
+	Colour = 0xE05010_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_LIQUID;
 	Enabled = 1;
-	
+
 	Advection = 0.3f;
 	AirDrag = 0.02f * CFDS;
 	AirLoss = 0.95f;
@@ -18,21 +22,22 @@ Element_LAVA::Element_LAVA()
 	Diffusion = 0.00f;
 	HotAir = 0.0003f	* CFDS;
 	Falldown = 2;
-	
+
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 0;
 	Hardness = 2;
-	
+	PhotonReflectWavelengths = 0x3FF00000;
+
 	Weight = 45;
-	
-	Temperature = R_TEMP+1500.0f+273.15f;
+
+	DefaultProperties.temp = R_TEMP + 1500.0f + 273.15f;
 	HeatConduct = 60;
 	Description = "Molten lava. Ignites flammable materials. Generated when metals and other materials melt, solidifies when cold.";
-	
-	State = ST_LIQUID;
+
 	Properties = TYPE_LIQUID|PROP_LIFE_DEC;
-	
+	CarriesTypeIn = 1U << FIELD_CTYPE;
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;
@@ -41,15 +46,13 @@ Element_LAVA::Element_LAVA()
 	LowTemperatureTransition = ST;
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
-	
-	Update = &Element_FIRE::update;
-	Graphics = &Element_LAVA::graphics;
+
+	Update = &Element_FIRE_update;
+	Graphics = &graphics;
+	Create = &create;
 }
 
-
-//#TPT-Directive ElementHeader Element_LAVA static int graphics(GRAPHICS_FUNC_ARGS)
-int Element_LAVA::graphics(GRAPHICS_FUNC_ARGS)
-
+static int graphics(GRAPHICS_FUNC_ARGS)
 {
 	*colr = cpart->life * 2 + 0xE0;
 	*colg = cpart->life * 1 + 0x50;
@@ -67,5 +70,7 @@ int Element_LAVA::graphics(GRAPHICS_FUNC_ARGS)
 	return 0;
 }
 
-
-Element_LAVA::~Element_LAVA() {}
+static void create(ELEMENT_CREATE_FUNC_ARGS)
+{
+	sim->parts[i].life = sim->rng.between(240, 359);
+}
