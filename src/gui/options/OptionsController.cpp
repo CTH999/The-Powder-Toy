@@ -186,6 +186,7 @@ void OptionsController::Exit()
 	HasExited = true;
 }
 
+
 OptionsController::~OptionsController()
 {
 	delete model;
