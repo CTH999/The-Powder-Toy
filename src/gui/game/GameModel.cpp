@@ -1,3 +1,4 @@
+#include "Config.h"
 #include "GameModel.h"
 #include "BitmapBrush.h"
 #include "EllipseBrush.h"
@@ -17,7 +18,9 @@
 #include "client/GameSave.h"
 #include "client/SaveFile.h"
 #include "client/SaveInfo.h"
+#include "client/http/ExecVoteRequest.h"
 #include "common/platform/Platform.h"
+#include "common/clipboard/Clipboard.h"
 #include "graphics/Renderer.h"
 #include "simulation/Air.h"
 #include "simulation/GOLString.h"
@@ -28,8 +31,15 @@
 #include "simulation/ElementClasses.h"
 #include "simulation/ElementGraphics.h"
 #include "simulation/ToolClasses.h"
-#include "gui/game/DecorationTool.h"
+#include "gui/game/tool/DecorationTool.h"
+#include "gui/game/tool/ElementTool.h"
+#include "gui/game/tool/GOLTool.h"
+#include "gui/game/tool/PropertyTool.h"
+#include "gui/game/tool/SampleTool.h"
+#include "gui/game/tool/SignTool.h"
+#include "gui/game/tool/WallTool.h"
 #include "gui/interface/Engine.h"
+#include "gui/dialogues/ErrorMessage.h"
 #include <iostream>
 #include <algorithm>
 #include <optional>
@@ -40,60 +50,67 @@ HistoryEntry::~HistoryEntry()
 	//   so the default dtor for ~HistoryEntry cannot be generated.
 }
 
-GameModel::GameModel():
-	clipboard(NULL),
-	placeSave(NULL),
-	activeMenu(-1),
+GameModel::GameModel(GameView *newView):
+	activeMenu(SC_POWDERS),
 	currentBrush(0),
-	currentSave(NULL),
-	currentFile(NULL),
-	currentUser(0, ""),
 	toolStrength(1.0f),
 	historyPosition(0),
 	activeColourPreset(0),
 	colourSelector(false),
 	colour(255, 0, 0, 255),
-	edgeMode(0),
+	edgeMode(EDGE_VOID),
 	ambientAirTemp(R_TEMP + 273.15f),
-	decoSpace(0)
+	vorticityCoeff(0.0f),
+	decoSpace(DECOSPACE_SRGB),
+	view(newView)
 {
 	sim = new Simulation();
-	ren = new Renderer(sim);
+	sim->useLuaCallbacks = true;
+	ren = new Renderer();
 
-	activeTools = regularToolset;
+	activeTools = regularToolset.data();
 
-	std::fill(decoToolset, decoToolset+4, (Tool*)NULL);
-	std::fill(regularToolset, regularToolset+4, (Tool*)NULL);
-
-	//Default render prefs
-	ren->SetRenderMode({
-		RENDER_FIRE,
-		RENDER_EFFE,
-		RENDER_BASC,
-	});
-	ren->SetDisplayMode({});
-	ren->SetColourMode(0);
+	std::fill(decoToolset.begin(), decoToolset.end(), nullptr);
+	std::fill(regularToolset.begin(), regularToolset.end(), nullptr);
 
 	//Load config into renderer
 	auto &prefs = GlobalPrefs::Ref();
-	ren->SetColourMode(prefs.Get("Renderer.ColourMode", 0U));
 
-	auto displayModes = prefs.Get("Renderer.DisplayModes", std::vector<unsigned int>{});
-	if (displayModes.size())
-	{
-		ren->SetDisplayMode(displayModes);
-	}
-	auto renderModes = prefs.Get("Renderer.RenderModes", std::vector<unsigned int>{});
-	if (renderModes.size())
-	{
-		ren->SetRenderMode(renderModes);
-	}
+	auto handleOldModes = [&prefs](ByteString prefName, ByteString oldPrefName, uint32_t defaultValue, auto setFunc) {
+		auto pref = prefs.Get<uint32_t>(prefName);
+		if (!pref.has_value())
+		{
+			auto modes = prefs.Get(oldPrefName, std::vector<unsigned int>{});
+			if (modes.size())
+			{
+				uint32_t mode = 0;
+				for (auto partial : modes)
+				{
+					mode |= partial;
+				}
+				pref = mode;
+			}
+			else
+			{
+				pref = defaultValue;
+			}
+		}
+		setFunc(*pref);
+	};
+	handleOldModes("Renderer.RenderMode", "Renderer.RenderModes", RENDER_FIRE | RENDER_EFFE | RENDER_BASC, [this](uint32_t renderMode) {
+		rendererSettings.renderMode = renderMode;
+	});
+	handleOldModes("Renderer.DisplayMode", "Renderer.DisplayModes", 0, [this](uint32_t displayMode) {
+		rendererSettings.displayMode = displayMode;
+	});
+	rendererSettings.colorMode = prefs.Get("Renderer.ColourMode", UINT32_C(0));
 
-	ren->gravityFieldEnabled = prefs.Get("Renderer.GravityField", false);
-	ren->decorations_enable = prefs.Get("Renderer.Decorations", true);
+	rendererSettings.gravityFieldEnabled = prefs.Get("Renderer.GravityField", false);
+	rendererSettings.decorationLevel = prefs.Get("Renderer.Decorations", true) ? RendererSettings::decorationEnabled : RendererSettings::decorationDisabled;
+	threadedRendering = prefs.Get("Renderer.SeparateThread", true);
 
 	//Load config into simulation
-	edgeMode = prefs.Get("Simulation.EdgeMode", 0); // TODO: EdgeMode enum
+	edgeMode = prefs.Get("Simulation.EdgeMode", NUM_EDGEMODES, EDGE_VOID);
 	sim->SetEdgeMode(edgeMode);
 	ambientAirTemp = float(R_TEMP) + 273.15f;
 	{
@@ -104,26 +121,35 @@ GameModel::GameModel():
 		}
 	}
 	sim->air->ambientAirTemp = ambientAirTemp;
-	decoSpace = prefs.Get("Simulation.DecoSpace", 0); // TODO: DecoSpace enum
+
+	vorticityCoeff = 0.1f; // The default for old saves is 0, but use 0.1 for old configs
+	{
+		auto vort = prefs.Get("Simulation.VorticityCoeff", vorticityCoeff);
+		if (0.0f <= vort && vort <= 1.0f)
+		{
+			vorticityCoeff = vort;
+		}
+	}
+	sim->air->vorticityCoeff = vorticityCoeff;
+
+	decoSpace = prefs.Get("Simulation.DecoSpace", NUM_DECOSPACES, DECOSPACE_SRGB);
 	sim->SetDecoSpace(decoSpace);
-	int ngrav_enable = prefs.Get("Simulation.NewtonianGravity", 0); // TODO: NewtonianGravity enum
-	if (ngrav_enable)
-		sim->grav->start_grav_async();
+	if (prefs.Get("Simulation.NewtonianGravity", false))
+	{
+		sim->EnableNewtonianGravity(true);
+	}
 	sim->aheat_enable = prefs.Get("Simulation.AmbientHeat", 0); // TODO: AmbientHeat enum
 	sim->pretty_powder = prefs.Get("Simulation.PrettyPowder", 0); // TODO: PrettyPowder enum
 
 	Favorite::Ref().LoadFavoritesFromPrefs();
 
 	//Load last user
-	if(Client::Ref().GetAuthUser().UserID)
-	{
-		currentUser = Client::Ref().GetAuthUser();
-	}
-
-	BuildMenus();
+	currentUser = Client::Ref().GetAuthUser();
 
 	perfectCircle = prefs.Get("PerfectCircleBrush", true);
 	BuildBrushList();
+
+	InitTools();
 
 	//Set default decoration colour
 	unsigned char colourR = std::max(std::min(prefs.Get("Decoration.Red", 200), 255), 0);
@@ -149,7 +175,7 @@ GameModel::GameModel():
 
 	mouseClickRequired = prefs.Get("MouseClickRequired", false);
 	includePressure = prefs.Get("Simulation.IncludePressure", true);
-	temperatureScale = prefs.Get("Renderer.TemperatureScale", 1); // TODO: TemperatureScale enum
+	temperatureScale = prefs.Get("Renderer.TemperatureScale", NUM_TEMPSCALES, TEMPSCALE_CELSIUS);
 
 	ClearSimulation();
 }
@@ -160,13 +186,13 @@ GameModel::~GameModel()
 	{
 		//Save to config:
 		Prefs::DeferWrite dw(prefs);
-		prefs.Set("Renderer.ColourMode", ren->GetColourMode());
-		prefs.Set("Renderer.DisplayModes", ren->GetDisplayMode());
-		prefs.Set("Renderer.RenderModes", ren->GetRenderMode());
-		prefs.Set("Renderer.GravityField", (bool)ren->gravityFieldEnabled);
-		prefs.Set("Renderer.Decorations", (bool)ren->decorations_enable);
-		prefs.Set("Renderer.DebugMode", ren->debugLines); //These two should always be equivalent, even though they are different things
-		prefs.Set("Simulation.NewtonianGravity", sim->grav->IsEnabled());
+		prefs.Set("Renderer.ColourMode", rendererSettings.colorMode);
+		prefs.Set("Renderer.DisplayMode", rendererSettings.displayMode);
+		prefs.Set("Renderer.RenderMode", rendererSettings.renderMode);
+		prefs.Set("Renderer.GravityField", rendererSettings.gravityFieldEnabled);
+		prefs.Set("Renderer.Decorations", GetDecoration());
+		prefs.Set("Renderer.DebugMode", rendererSettings.debugLines); //These two should always be equivalent, even though they are different things
+		prefs.Set("Simulation.NewtonianGravity", bool(sim->grav));
 		prefs.Set("Simulation.AmbientHeat", sim->aheat_enable);
 		prefs.Set("Simulation.PrettyPowder", sim->pretty_powder);
 		prefs.Set("Decoration.Red", (int)colour.Red);
@@ -175,22 +201,8 @@ GameModel::~GameModel()
 		prefs.Set("Decoration.Alpha", (int)colour.Alpha);
 	}
 
-	for (size_t i = 0; i < menuList.size(); i++)
-	{
-		if (i == SC_FAVORITES)
-			menuList[i]->ClearTools();
-		delete menuList[i];
-	}
-	for (std::vector<Tool*>::iterator iter = extraElementTools.begin(), end = extraElementTools.end(); iter != end; ++iter)
-	{
-		delete *iter;
-	}
 	delete sim;
 	delete ren;
-	delete placeSave;
-	delete clipboard;
-	delete currentSave;
-	delete currentFile;
 	//if(activeTools)
 	//	delete[] activeTools;
 }
@@ -221,241 +233,6 @@ void GameModel::BuildQuickOptionMenu(GameController * controller)
 
 	notifyQuickOptionsChanged();
 	UpdateQuickOptions();
-}
-
-void GameModel::BuildMenus()
-{
-	int lastMenu = -1;
-	if(activeMenu != -1)
-		lastMenu = activeMenu;
-
-	ByteString activeToolIdentifiers[4];
-	if(regularToolset[0])
-		activeToolIdentifiers[0] = regularToolset[0]->Identifier;
-	if(regularToolset[1])
-		activeToolIdentifiers[1] = regularToolset[1]->Identifier;
-	if(regularToolset[2])
-		activeToolIdentifiers[2] = regularToolset[2]->Identifier;
-	if(regularToolset[3])
-		activeToolIdentifiers[3] = regularToolset[3]->Identifier;
-
-	//Empty current menus
-	for (size_t i = 0; i < menuList.size(); i++)
-	{
-		if (i == SC_FAVORITES)
-			menuList[i]->ClearTools();
-		delete menuList[i];
-	}
-	menuList.clear();
-	toolList.clear();
-
-	for(std::vector<Tool*>::iterator iter = extraElementTools.begin(), end = extraElementTools.end(); iter != end; ++iter)
-	{
-		delete *iter;
-	}
-	extraElementTools.clear();
-	elementTools.clear();
-
-	//Create menus
-	for (int i = 0; i < SC_TOTAL; i++)
-	{
-		menuList.push_back(new Menu(sim->msections[i].icon, sim->msections[i].name, sim->msections[i].doshow));
-	}
-
-	//Build menus from Simulation elements
-	for(int i = 0; i < PT_NUM; i++)
-	{
-		if(sim->elements[i].Enabled)
-		{
-			Tool * tempTool;
-			if(i == PT_LIGH)
-			{
-				tempTool = new Element_LIGH_Tool(i, sim->elements[i].Name, sim->elements[i].Description, RGB<uint8_t>::Unpack(sim->elements[i].Colour), sim->elements[i].Identifier, sim->elements[i].IconGenerator);
-			}
-			else if(i == PT_TESC)
-			{
-				tempTool = new Element_TESC_Tool(i, sim->elements[i].Name, sim->elements[i].Description, RGB<uint8_t>::Unpack(sim->elements[i].Colour), sim->elements[i].Identifier, sim->elements[i].IconGenerator);
-			}
-			else if(i == PT_STKM || i == PT_FIGH || i == PT_STKM2)
-			{
-				tempTool = new PlopTool(i, sim->elements[i].Name, sim->elements[i].Description, RGB<uint8_t>::Unpack(sim->elements[i].Colour), sim->elements[i].Identifier, sim->elements[i].IconGenerator);
-			}
-			else
-			{
-				tempTool = new ElementTool(i, sim->elements[i].Name, sim->elements[i].Description, RGB<uint8_t>::Unpack(sim->elements[i].Colour), sim->elements[i].Identifier, sim->elements[i].IconGenerator);
-			}
-
-			if (sim->elements[i].MenuSection >= 0 && sim->elements[i].MenuSection < SC_TOTAL && sim->elements[i].MenuVisible)
-			{
-				menuList[sim->elements[i].MenuSection]->AddTool(tempTool);
-			}
-			else
-			{
-				extraElementTools.push_back(tempTool);
-			}
-			elementTools.push_back(tempTool);
-		}
-	}
-
-	//Build menu for GOL types
-	for(int i = 0; i < NGOL; i++)
-	{
-		Tool * tempTool = new ElementTool(PT_LIFE|PMAPID(i), builtinGol[i].name, builtinGol[i].description, RGB<uint8_t>::Unpack(builtinGol[i].colour), "DEFAULT_PT_LIFE_"+builtinGol[i].name.ToAscii());
-		menuList[SC_LIFE]->AddTool(tempTool);
-	}
-	{
-		auto &prefs = GlobalPrefs::Ref();
-		auto customGOLTypes = prefs.Get("CustomGOL.Types", std::vector<ByteString>{});
-		std::vector<ByteString> validatedCustomLifeTypes;
-		std::vector<Simulation::CustomGOLData> newCustomGol;
-		bool removedAny = false;
-		for (auto gol : customGOLTypes)
-		{
-			auto parts = gol.FromUtf8().PartitionBy(' ');
-			if (parts.size() != 4)
-			{
-				removedAny = true;
-				continue;
-			}
-			Simulation::CustomGOLData gd;
-			gd.nameString = parts[0];
-			gd.ruleString = parts[1];
-			auto &colour1String = parts[2];
-			auto &colour2String = parts[3];
-			if (!ValidateGOLName(gd.nameString))
-			{
-				removedAny = true;
-				continue;
-			}
-			gd.rule = ParseGOLString(gd.ruleString);
-			if (gd.rule == -1)
-			{
-				removedAny = true;
-				continue;
-			}
-			try
-			{
-				gd.colour1 = colour1String.ToNumber<int>();
-				gd.colour2 = colour2String.ToNumber<int>();
-			}
-			catch (std::exception &)
-			{
-				removedAny = true;
-				continue;
-			}
-			newCustomGol.push_back(gd);
-			validatedCustomLifeTypes.push_back(gol);
-		}
-		if (removedAny)
-		{
-			// All custom rules that fail validation will be removed
-			prefs.Set("CustomGOL.Types", validatedCustomLifeTypes);
-		}
-		for (auto &gd : newCustomGol)
-		{
-			Tool * tempTool = new ElementTool(PT_LIFE|PMAPID(gd.rule), gd.nameString, "Custom GOL type: " + gd.ruleString, RGB<uint8_t>::Unpack(gd.colour1), "DEFAULT_PT_LIFECUST_"+gd.nameString.ToAscii(), NULL);
-			menuList[SC_LIFE]->AddTool(tempTool);
-		}
-		sim->SetCustomGOL(newCustomGol);
-	}
-
-	//Build other menus from wall data
-	for(int i = 0; i < UI_WALLCOUNT; i++)
-	{
-		Tool * tempTool = new WallTool(i, sim->wtypes[i].descs, RGB<uint8_t>::Unpack(sim->wtypes[i].colour), sim->wtypes[i].identifier, sim->wtypes[i].textureGen);
-		menuList[SC_WALL]->AddTool(tempTool);
-		//sim->wtypes[i]
-	}
-
-	//Build menu for tools
-	for (size_t i = 0; i < sim->tools.size(); i++)
-	{
-		Tool *tempTool = new Tool(
-			i,
-			sim->tools[i].Name,
-			sim->tools[i].Description,
-			RGB<uint8_t>::Unpack(sim->tools[i].Colour),
-			sim->tools[i].Identifier
-		);
-		menuList[SC_TOOL]->AddTool(tempTool);
-	}
-	//Add special sign and prop tools
-	menuList[SC_TOOL]->AddTool(new WindTool());
-	menuList[SC_TOOL]->AddTool(new PropertyTool(*this));
-	menuList[SC_TOOL]->AddTool(new SignTool(*this));
-	menuList[SC_TOOL]->AddTool(new SampleTool(*this));
-	menuList[SC_LIFE]->AddTool(new GOLTool(*this));
-
-	//Add decoration tools to menu
-	menuList[SC_DECO]->AddTool(new DecorationTool(*ren, DECO_ADD, "ADD", "Colour blending: Add.", 0x000000_rgb, "DEFAULT_DECOR_ADD"));
-	menuList[SC_DECO]->AddTool(new DecorationTool(*ren, DECO_SUBTRACT, "SUB", "Colour blending: Subtract.", 0x000000_rgb, "DEFAULT_DECOR_SUB"));
-	menuList[SC_DECO]->AddTool(new DecorationTool(*ren, DECO_MULTIPLY, "MUL", "Colour blending: Multiply.", 0x000000_rgb, "DEFAULT_DECOR_MUL"));
-	menuList[SC_DECO]->AddTool(new DecorationTool(*ren, DECO_DIVIDE, "DIV", "Colour blending: Divide." , 0x000000_rgb, "DEFAULT_DECOR_DIV"));
-	menuList[SC_DECO]->AddTool(new DecorationTool(*ren, DECO_SMUDGE, "SMDG", "Smudge tool, blends surrounding deco together.", 0x000000_rgb, "DEFAULT_DECOR_SMDG"));
-	menuList[SC_DECO]->AddTool(new DecorationTool(*ren, DECO_CLEAR, "CLR", "Erase any set decoration.", 0x000000_rgb, "DEFAULT_DECOR_CLR"));
-	menuList[SC_DECO]->AddTool(new DecorationTool(*ren, DECO_DRAW, "SET", "Draw decoration (No blending).", 0x000000_rgb, "DEFAULT_DECOR_SET"));
-	SetColourSelectorColour(colour); // update tool colors
-	decoToolset[0] = GetToolFromIdentifier("DEFAULT_DECOR_SET");
-	decoToolset[1] = GetToolFromIdentifier("DEFAULT_DECOR_CLR");
-	decoToolset[2] = GetToolFromIdentifier("DEFAULT_UI_SAMPLE");
-	decoToolset[3] = GetToolFromIdentifier("DEFAULT_PT_NONE");
-
-	regularToolset[0] = GetToolFromIdentifier(activeToolIdentifiers[0]);
-	regularToolset[1] = GetToolFromIdentifier(activeToolIdentifiers[1]);
-	regularToolset[2] = GetToolFromIdentifier(activeToolIdentifiers[2]);
-	regularToolset[3] = GetToolFromIdentifier(activeToolIdentifiers[3]);
-
-	//Set default tools
-	if (!regularToolset[0])
-		regularToolset[0] = GetToolFromIdentifier("DEFAULT_PT_DUST");
-	if (!regularToolset[1])
-		regularToolset[1] = GetToolFromIdentifier("DEFAULT_PT_NONE");
-	if (!regularToolset[2])
-		regularToolset[2] = GetToolFromIdentifier("DEFAULT_UI_SAMPLE");
-	if (!regularToolset[3])
-		regularToolset[3] = GetToolFromIdentifier("DEFAULT_PT_NONE");
-
-	lastTool = activeTools[0];
-
-	//Set default menu
-	activeMenu = SC_POWDERS;
-
-	if(lastMenu != -1)
-		activeMenu = lastMenu;
-
-	if(activeMenu != -1)
-		toolList = menuList[activeMenu]->GetToolList();
-	else
-		toolList = std::vector<Tool*>();
-
-	notifyMenuListChanged();
-	notifyToolListChanged();
-	notifyActiveToolsChanged();
-	notifyLastToolChanged();
-
-	//Build menu for favorites
-	BuildFavoritesMenu();
-}
-
-void GameModel::BuildFavoritesMenu()
-{
-	menuList[SC_FAVORITES]->ClearTools();
-
-	std::vector<ByteString> favList = Favorite::Ref().GetFavoritesList();
-	for (size_t i = 0; i < favList.size(); i++)
-	{
-		Tool *tool = GetToolFromIdentifier(favList[i]);
-		if (tool)
-			menuList[SC_FAVORITES]->AddTool(tool);
-	}
-
-	if (activeMenu == SC_FAVORITES)
-		toolList = menuList[SC_FAVORITES]->GetToolList();
-
-	notifyMenuListChanged();
-	notifyToolListChanged();
-	notifyActiveToolsChanged();
-	notifyLastToolChanged();
 }
 
 void GameModel::BuildBrushList()
@@ -493,21 +270,15 @@ void GameModel::BuildBrushList()
 
 Tool *GameModel::GetToolFromIdentifier(ByteString const &identifier)
 {
-	for (auto *menu : menuList)
+	for (auto &ptr : tools)
 	{
-		for (auto *tool : menu->GetToolList())
+		if (!ptr)
 		{
-			if (identifier == tool->Identifier)
-			{
-				return tool;
-			}
+			continue;
 		}
-	}
-	for (auto *extra : extraElementTools)
-	{
-		if (identifier == extra->Identifier)
+		if (ptr->Identifier == identifier)
 		{
-			return extra;
+			return ptr.get();
 		}
 	}
 	return nullptr;
@@ -524,9 +295,14 @@ int GameModel::GetEdgeMode()
 	return this->edgeMode;
 }
 
-void GameModel::SetTemperatureScale(int temperatureScale)
+void GameModel::SetTemperatureScale(TempScale temperatureScale)
 {
 	this->temperatureScale = temperatureScale;
+}
+
+void GameModel::SetThreadedRendering(bool newThreadedRendering)
+{
+	threadedRendering = newThreadedRendering;
 }
 
 void GameModel::SetAmbientAirTemperature(float ambientAirTemp)
@@ -538,6 +314,17 @@ void GameModel::SetAmbientAirTemperature(float ambientAirTemp)
 float GameModel::GetAmbientAirTemperature()
 {
 	return this->ambientAirTemp;
+}
+
+void GameModel::SetVorticityCoeff(float vorticityCoeff)
+{
+	this->vorticityCoeff = vorticityCoeff;
+	sim->air->vorticityCoeff = vorticityCoeff;
+}
+
+float GameModel::GetVorticityCoeff()
+{
+	return this->vorticityCoeff;
 }
 
 void GameModel::SetDecoSpace(int decoSpace)
@@ -788,18 +575,33 @@ void GameModel::SetUndoHistoryLimit(unsigned int undoHistoryLimit_)
 
 void GameModel::SetVote(int direction)
 {
-	if(currentSave)
+	currentSave.queuedVote = direction;
+}
+
+void GameModel::Tick()
+{
+	if (currentSave.execVoteRequest && currentSave.execVoteRequest->CheckDone())
 	{
-		RequestStatus status = Client::Ref().ExecVote(currentSave->GetID(), direction);
-		if(status == RequestOkay)
+		try
 		{
-			currentSave->vote = direction;
+			currentSave.execVoteRequest->Finish();
+			currentSave.saveInfo->vote = currentSave.execVoteRequest->Direction();
 			notifySaveChanged();
 		}
-		else
+		catch (const http::RequestError &ex)
 		{
-			throw GameModelException("Could not vote: "+Client::Ref().GetLastError());
+			new ErrorMessage("Error while voting", ByteString(ex.what()).FromUtf8());
 		}
+		currentSave.execVoteRequest.reset();
+	}
+	if (!currentSave.execVoteRequest && currentSave.queuedVote)
+	{
+		if (currentSave.saveInfo)
+		{
+			currentSave.execVoteRequest = std::make_unique<http::ExecVoteRequest>(currentSave.saveInfo->GetID(), *currentSave.queuedVote);
+			currentSave.execVoteRequest->Start();
+		}
+		currentSave.queuedVote.reset();
 	}
 }
 
@@ -816,6 +618,14 @@ Brush *GameModel::GetBrushByID(int i)
 		return nullptr;
 }
 
+int GameModel::GetBrushIndex(const Brush &brush)
+{
+	auto it = std::find_if(brushList.begin(), brushList.end(), [&brush](auto &ptr) {
+		return ptr.get() == &brush;
+	});
+	return int(it - brushList.begin());
+}
+
 int GameModel::GetBrushID()
 {
 	return currentBrush;
@@ -823,7 +633,9 @@ int GameModel::GetBrushID()
 
 void GameModel::SetBrushID(int i)
 {
+	auto prevRadius = brushList[currentBrush]->GetRadius();
 	currentBrush = i%brushList.size();
+	brushList[currentBrush]->SetRadius(prevRadius);
 	notifyBrushChanged();
 }
 
@@ -836,7 +648,7 @@ void GameModel::AddObserver(GameView * observer){
 	observer->NotifySaveChanged(this);
 	observer->NotifyBrushChanged(this);
 	observer->NotifyMenuListChanged(this);
-	observer->NotifyToolListChanged(this);
+	observer->NotifyActiveMenuToolListChanged(this);
 	observer->NotifyUserChanged(this);
 	observer->NotifyZoomChanged(this);
 	observer->NotifyColourSelectorVisibilityChanged(this);
@@ -861,51 +673,39 @@ float GameModel::GetToolStrength()
 void GameModel::SetActiveMenu(int menuID)
 {
 	activeMenu = menuID;
-	toolList = menuList[menuID]->GetToolList();
-	notifyToolListChanged();
+	notifyActiveMenuToolListChanged();
 
 	if(menuID == SC_DECO)
 	{
-		if(activeTools != decoToolset)
+		if(activeTools != decoToolset.data())
 		{
-			activeTools = decoToolset;
+			activeTools = decoToolset.data();
 			notifyActiveToolsChanged();
 		}
 	}
 	else
 	{
-		if(activeTools != regularToolset)
+		if(activeTools != regularToolset.data())
 		{
-			activeTools = regularToolset;
+			activeTools = regularToolset.data();
 			notifyActiveToolsChanged();
 		}
 	}
 }
 
-std::vector<Tool*> GameModel::GetUnlistedTools()
+std::vector<Tool *> GameModel::GetActiveMenuToolList()
 {
-	return extraElementTools;
-}
-
-std::vector<Tool*> GameModel::GetToolList()
-{
-	return toolList;
+	std::vector<Tool *> activeMenuToolList;
+	if (activeMenu >= 0 && activeMenu < int(menuList.size()))
+	{
+		activeMenuToolList = menuList[activeMenu]->GetToolList();
+	}
+	return activeMenuToolList;
 }
 
 int GameModel::GetActiveMenu()
 {
 	return activeMenu;
-}
-
-//Get an element tool from an element ID
-Tool * GameModel::GetElementTool(int elementID)
-{
-	for(std::vector<Tool*>::iterator iter = elementTools.begin(), end = elementTools.end(); iter != end; ++iter)
-	{
-		if((*iter)->ToolID == elementID)
-			return *iter;
-	}
-	return NULL;
 }
 
 Tool * GameModel::GetActiveTool(int selection)
@@ -924,120 +724,121 @@ std::vector<QuickOption*> GameModel::GetQuickOptions()
 	return quickOptions;
 }
 
-std::vector<Menu*> GameModel::GetMenuList()
+std::vector<Menu *> GameModel::GetMenuList()
 {
-	return menuList;
-}
-
-SaveInfo * GameModel::GetSave()
-{
-	return currentSave;
-}
-
-void GameModel::SetSave(SaveInfo * newSave, bool invertIncludePressure)
-{
-	if(currentSave != newSave)
+	std::vector<Menu *> ptrs;
+	for (auto &ptr : menuList)
 	{
-		delete currentSave;
-		if(newSave == NULL)
-			currentSave = NULL;
-		else
-			currentSave = new SaveInfo(*newSave);
+		ptrs.push_back(ptr.get());
 	}
-	delete currentFile;
-	currentFile = NULL;
+	return ptrs;
+}
 
-	if(currentSave && currentSave->GetGameSave())
+SaveInfo *GameModel::GetSave() // non-owning
+{
+	return currentSave.saveInfo.get();
+}
+
+std::unique_ptr<SaveInfo> GameModel::TakeSave()
+{
+	// we don't notify listeners because we'll get a new save soon anyway
+	SaveInfoWrapper empty;
+	std::swap(empty, currentSave);
+	return std::move(empty.saveInfo);
+}
+
+void GameModel::SaveToSimParameters(const GameSave &saveData)
+{
+	SetPaused(saveData.paused | GetPaused());
+	sim->gravityMode = saveData.gravityMode;
+	sim->customGravityX = saveData.customGravityX;
+	sim->customGravityY = saveData.customGravityY;
+	sim->air->airMode = saveData.airMode;
+	sim->air->ambientAirTemp = saveData.ambientAirTemp;
+	sim->air->vorticityCoeff = saveData.vorticityCoeff;
+	sim->edgeMode = saveData.edgeMode;
+	sim->legacy_enable = saveData.legacyEnable;
+	sim->water_equal_test = saveData.waterEEnabled;
+	sim->aheat_enable = saveData.aheatEnable;
+	sim->EnableNewtonianGravity(saveData.gravityEnable);
+	sim->frameCount = saveData.frameCount;
+	if (saveData.hasRngState)
 	{
-		GameSave * saveData = currentSave->GetGameSave();
-		SetPaused(saveData->paused | GetPaused());
-		sim->gravityMode = saveData->gravityMode;
-		sim->customGravityX = saveData->customGravityX;
-		sim->customGravityY = saveData->customGravityY;
-		sim->air->airMode = saveData->airMode;
-		sim->air->ambientAirTemp = saveData->ambientAirTemp;
-		sim->edgeMode = saveData->edgeMode;
-		sim->legacy_enable = saveData->legacyEnable;
-		sim->water_equal_test = saveData->waterEEnabled;
-		sim->aheat_enable = saveData->aheatEnable;
-		if(saveData->gravityEnable)
-			sim->grav->start_grav_async();
-		else
-			sim->grav->stop_grav_async();
+		sim->rng.state(saveData.rngState);
+	}
+	else
+	{
+		sim->rng = RNG();
+	}
+	sim->ensureDeterminism = saveData.ensureDeterminism;
+}
+
+void GameModel::SetSave(std::unique_ptr<SaveInfo> newSave, bool invertIncludePressure)
+{
+	currentSave = { std::move(newSave) };
+	currentFile.reset();
+
+	if (currentSave.saveInfo && currentSave.saveInfo->GetGameSave())
+	{
+		auto *saveData = currentSave.saveInfo->GetGameSave();
+		SaveToSimParameters(*saveData);
 		sim->clear_sim();
+		view->PauseRendererThread();
 		ren->ClearAccumulation();
-		if (!sim->Load(saveData, !invertIncludePressure))
+		sim->Load(saveData, !invertIncludePressure, { 0, 0 });
+		// This save was created before logging existed
+		// Add in the correct info
+		if (saveData->authors.GetSize() == 0)
 		{
-			// This save was created before logging existed
-			// Add in the correct info
-			if (saveData->authors.size() == 0)
-			{
-				saveData->authors["type"] = "save";
-				saveData->authors["id"] = newSave->id;
-				saveData->authors["username"] = newSave->userName;
-				saveData->authors["title"] = newSave->name.ToUtf8();
-				saveData->authors["description"] = newSave->Description.ToUtf8();
-				saveData->authors["published"] = (int)newSave->Published;
-				saveData->authors["date"] = newSave->updatedDate;
-			}
-			// This save was probably just created, and we didn't know the ID when creating it
-			// Update with the proper ID
-			else if (saveData->authors.get("id", -1) == 0 || saveData->authors.get("id", -1) == -1)
-			{
-				saveData->authors["id"] = newSave->id;
-			}
-			Client::Ref().OverwriteAuthorInfo(saveData->authors);
+			auto gameSave = currentSave.saveInfo->TakeGameSave();
+			gameSave->authors["type"] = "save";
+			gameSave->authors["id"] = currentSave.saveInfo->id;
+			gameSave->authors["username"] = currentSave.saveInfo->userName;
+			gameSave->authors["title"] = currentSave.saveInfo->name.ToUtf8();
+			gameSave->authors["description"] = currentSave.saveInfo->Description.ToUtf8();
+			gameSave->authors["published"] = (int)currentSave.saveInfo->Published;
+			gameSave->authors["date"] = int64_t(currentSave.saveInfo->updatedDate);
+			currentSave.saveInfo->SetGameSave(std::move(gameSave));
 		}
+		// This save was probably just created, and we didn't know the ID when creating it
+		// Update with the proper ID
+		else if (saveData->authors.Get("id", -1) == 0 || saveData->authors.Get("id", -1) == -1)
+		{
+			auto gameSave = currentSave.saveInfo->TakeGameSave();
+			gameSave->authors["id"] = currentSave.saveInfo->id;
+			currentSave.saveInfo->SetGameSave(std::move(gameSave));
+		}
+		Client::Ref().OverwriteAuthorInfo(saveData->authors);
 	}
 	notifySaveChanged();
 	UpdateQuickOptions();
 }
 
-SaveFile * GameModel::GetSaveFile()
+const SaveFile *GameModel::GetSaveFile() const
 {
-	return currentFile;
+	return currentFile.get();
 }
 
-void GameModel::SetSaveFile(SaveFile * newSave, bool invertIncludePressure)
+std::unique_ptr<SaveFile> GameModel::TakeSaveFile()
 {
-	if(currentFile != newSave)
-	{
-		delete currentFile;
-		if(newSave == NULL)
-			currentFile = NULL;
-		else
-			currentFile = new SaveFile(*newSave);
-	}
-	delete currentSave;
-	currentSave = NULL;
+	// we don't notify listeners because we'll get a new save soon anyway
+	return std::move(currentFile);
+}
 
-	if(newSave && newSave->GetGameSave())
+void GameModel::SetSaveFile(std::unique_ptr<SaveFile> newSave, bool invertIncludePressure)
+{
+	currentFile = std::move(newSave);
+	currentSave = {};
+
+	if (currentFile && currentFile->GetGameSave())
 	{
-		GameSave * saveData = newSave->GetGameSave();
-		SetPaused(saveData->paused | GetPaused());
-		sim->gravityMode = saveData->gravityMode;
-		sim->customGravityX = saveData->customGravityX;
-		sim->customGravityY = saveData->customGravityY;
-		sim->air->airMode = saveData->airMode;
-		sim->air->ambientAirTemp = saveData->ambientAirTemp;
-		sim->edgeMode = saveData->edgeMode;
-		sim->legacy_enable = saveData->legacyEnable;
-		sim->water_equal_test = saveData->waterEEnabled;
-		sim->aheat_enable = saveData->aheatEnable;
-		if(saveData->gravityEnable && !sim->grav->IsEnabled())
-		{
-			sim->grav->start_grav_async();
-		}
-		else if(!saveData->gravityEnable && sim->grav->IsEnabled())
-		{
-			sim->grav->stop_grav_async();
-		}
+		auto *saveData = currentFile->GetGameSave();
+		SaveToSimParameters(*saveData);
 		sim->clear_sim();
+		view->PauseRendererThread();
 		ren->ClearAccumulation();
-		if (!sim->Load(saveData, !invertIncludePressure))
-		{
-			Client::Ref().OverwriteAuthorInfo(saveData->authors);
-		}
+		sim->Load(saveData, !invertIncludePressure, { 0, 0 });
+		Client::Ref().OverwriteAuthorInfo(saveData->authors);
 	}
 
 	notifySaveChanged();
@@ -1054,7 +855,7 @@ Renderer * GameModel::GetRenderer()
 	return ren;
 }
 
-User GameModel::GetUser()
+const std::optional<User> &GameModel::GetUser() const
 {
 	return currentUser;
 }
@@ -1075,96 +876,85 @@ void GameModel::SetLastTool(Tool * newTool)
 
 void GameModel::SetZoomEnabled(bool enabled)
 {
-	if (enabled)
-		ren->Zoom = zoomSettings;
-	else
-		ren->Zoom = std::nullopt;
+	view->GetGraphics()->zoomEnabled = enabled;
 	notifyZoomChanged();
 }
 
-bool GameModel::GetZoomEnabled() const
+bool GameModel::GetZoomEnabled()
 {
-	return bool(ren->Zoom);
+	return view->GetGraphics()->zoomEnabled;
 }
 
-void GameModel::SetZoomScopePosition(Vec2<int> position)
+void GameModel::SetZoomPosition(ui::Point position)
 {
-	zoomSettings.ScopePosition = position;
-	if (ren->Zoom)
-		ren->Zoom->ScopePosition = position;
+	view->GetGraphics()->zoomScopePosition = position;
 	notifyZoomChanged();
 }
 
-Vec2<int> GameModel::GetZoomScopePosition() const
+ui::Point GameModel::GetZoomPosition()
 {
-	return zoomSettings.ScopePosition;
+	return view->GetGraphics()->zoomScopePosition;
 }
 
-void GameModel::SetZoomWindowPosition(Vec2<int> position)
-{
-	zoomSettings.WindowPosition = position;
-	if (ren->Zoom)
-		ren->Zoom->WindowPosition = position;
-	notifyZoomChanged();
-}
-
-Vec2<int> GameModel::GetZoomWindowPosition() const
-{
-	return zoomSettings.WindowPosition;
-}
-
-void GameModel::SetZoomScopeSize(int size)
-{
-	zoomSettings.ScopeSize = size;
-	if (ren->Zoom)
-		ren->Zoom->ScopeSize = size;
-	notifyZoomChanged();
-}
-
-int GameModel::GetZoomScopeSize() const
-{
-	return zoomSettings.ScopeSize;
-}
-
-void GameModel::SetZoomFactor(int factor)
-{
-	zoomSettings.Factor = factor;
-	if (ren->Zoom)
-		ren->Zoom->Factor = factor;
-	notifyZoomChanged();
-}
-
-int GameModel::GetZoomFactor() const
-{
-	return zoomSettings.Factor;
-}
-
-bool GameModel::MouseInZoom(Vec2<int> position) const
+bool GameModel::MouseInZoom(ui::Point position)
 {
 	if (!GetZoomEnabled())
 		return false;
 
-	auto const window = RectSized(
-		GetZoomWindowPosition(),
-		Vec2(1, 1) * Renderer::ZoomSettings::WindowSize(GetZoomScopeSize(), GetZoomFactor())
-	);
-	return window.Contains(position);
+	int zoomFactor = GetZoomFactor();
+	ui::Point zoomWindowPosition = GetZoomWindowPosition();
+	ui::Point zoomWindowSize = ui::Point(GetZoomSize()*zoomFactor, GetZoomSize()*zoomFactor);
+
+	if (position.X >= zoomWindowPosition.X && position.Y >= zoomWindowPosition.Y && position.X < zoomWindowPosition.X+zoomWindowSize.X && position.Y < zoomWindowPosition.Y+zoomWindowSize.Y)
+		return true;
+	return false;
 }
 
-Vec2<int> GameModel::AdjustZoomCoords(Vec2<int> position) const
+ui::Point GameModel::AdjustZoomCoords(ui::Point position)
 {
 	if (!GetZoomEnabled())
 		return position;
 
-	auto const factor = GetZoomFactor();
-	auto const window = RectSized(
-		GetZoomWindowPosition(),
-		Vec2(1, 1) * Renderer::ZoomSettings::WindowSize(GetZoomScopeSize(), factor)
-	);
-	if (window.Contains(position))
-		return (position - window.TopLeft) / factor + GetZoomScopePosition();
-	else
-		return position;
+	int zoomFactor = GetZoomFactor();
+	ui::Point zoomWindowPosition = GetZoomWindowPosition();
+	ui::Point zoomWindowSize = ui::Point(GetZoomSize()*zoomFactor, GetZoomSize()*zoomFactor);
+
+	if (position.X >= zoomWindowPosition.X && position.Y >= zoomWindowPosition.Y && position.X < zoomWindowPosition.X+zoomWindowSize.X && position.Y < zoomWindowPosition.Y+zoomWindowSize.Y)
+		return ((position-zoomWindowPosition)/GetZoomFactor())+GetZoomPosition();
+	return position;
+}
+
+void GameModel::SetZoomWindowPosition(ui::Point position)
+{
+	view->GetGraphics()->zoomWindowPosition = position;
+	notifyZoomChanged();
+}
+
+ui::Point GameModel::GetZoomWindowPosition()
+{
+	return view->GetGraphics()->zoomWindowPosition;
+}
+
+void GameModel::SetZoomSize(int size)
+{
+	view->GetGraphics()->zoomScopeSize = size;
+	notifyZoomChanged();
+}
+
+int GameModel::GetZoomSize()
+{
+	return view->GetGraphics()->zoomScopeSize;
+}
+
+void GameModel::SetZoomFactor(int factor)
+{
+	view->GetGraphics()->ZFACTOR = factor;
+	notifyZoomChanged();
+}
+
+int GameModel::GetZoomFactor()
+{
+	return view->GetGraphics()->ZFACTOR;
 }
 
 void GameModel::SetActiveColourPreset(size_t preset)
@@ -1228,7 +1018,7 @@ ui::Colour GameModel::GetColourSelectorColour()
 	return colour;
 }
 
-void GameModel::SetUser(User user)
+void GameModel::SetUser(std::optional<User> user)
 {
 	currentUser = user;
 	//Client::Ref().SetAuthUser(user);
@@ -1244,20 +1034,21 @@ void GameModel::SetPaused(bool pauseState)
 		Log(logmessage, false);
 	}
 
-	sim->sys_pause = pauseState?1:0;
+	paused = pauseState;
 	notifyPausedChanged();
 }
 
-bool GameModel::GetPaused()
+bool GameModel::GetPaused() const
 {
-	return sim->sys_pause?true:false;
+	return paused;
 }
 
 void GameModel::SetDecoration(bool decorationState)
 {
-	if (ren->decorations_enable != (decorationState?1:0))
+	auto desiredLevel = decorationState ? RendererSettings::decorationEnabled : RendererSettings::decorationDisabled;
+	if (rendererSettings.decorationLevel != desiredLevel)
 	{
-		ren->decorations_enable = decorationState?1:0;
+		rendererSettings.decorationLevel = desiredLevel;
 		notifyDecorationChanged();
 		UpdateQuickOptions();
 		if (decorationState)
@@ -1269,7 +1060,7 @@ void GameModel::SetDecoration(bool decorationState)
 
 bool GameModel::GetDecoration()
 {
-	return ren->decorations_enable?true:false;
+	return rendererSettings.decorationLevel != RendererSettings::decorationDisabled;
 }
 
 void GameModel::SetAHeatEnable(bool aHeat)
@@ -1294,14 +1085,13 @@ void GameModel::ResetAHeat()
 
 void GameModel::SetNewtonianGravity(bool newtonainGravity)
 {
+	sim->EnableNewtonianGravity(newtonainGravity);
     if (newtonainGravity)
     {
-        sim->grav->start_grav_async();
         SetInfoTip("Newtonian Gravity: On");
     }
     else
     {
-        sim->grav->stop_grav_async();
         SetInfoTip("Newtonian Gravity: Off");
     }
     UpdateQuickOptions();
@@ -1309,12 +1099,12 @@ void GameModel::SetNewtonianGravity(bool newtonainGravity)
 
 bool GameModel::GetNewtonianGrvity()
 {
-    return sim->grav->IsEnabled();
+    return bool(sim->grav);
 }
 
 void GameModel::ShowGravityGrid(bool showGrid)
 {
-	ren->gravityFieldEnabled = showGrid;
+	rendererSettings.gravityFieldEnabled = showGrid;
 	if (showGrid)
 		SetInfoTip("Gravity Grid: On");
 	else
@@ -1323,25 +1113,26 @@ void GameModel::ShowGravityGrid(bool showGrid)
 
 bool GameModel::GetGravityGrid()
 {
-	return ren->gravityFieldEnabled;
+	return rendererSettings.gravityFieldEnabled;
 }
 
 void GameModel::FrameStep(int frames)
 {
-	sim->framerender += frames;
+	queuedFrames += frames;
 }
 
 void GameModel::ClearSimulation()
 {
 	//Load defaults
-	sim->gravityMode = 0;
+	sim->gravityMode = GRAV_VERTICAL;
 	sim->customGravityX = 0.0f;
 	sim->customGravityY = 0.0f;
-	sim->air->airMode = 0;
+	sim->air->airMode = AIR_ON;
 	sim->legacy_enable = false;
 	sim->water_equal_test = false;
 	sim->SetEdgeMode(edgeMode);
 	sim->air->ambientAirTemp = ambientAirTemp;
+	sim->air->vorticityCoeff = vorticityCoeff;
 
 	sim->clear_sim();
 	ren->ClearAccumulation();
@@ -1351,43 +1142,57 @@ void GameModel::ClearSimulation()
 	UpdateQuickOptions();
 }
 
-void GameModel::SetPlaceSave(GameSave * save)
+void GameModel::SetPlaceSave(std::unique_ptr<GameSave> save)
 {
-	if (save != placeSave)
-	{
-		delete placeSave;
-		if (save)
-			placeSave = new GameSave(*save);
-		else
-			placeSave = NULL;
-	}
+	transformedPlaceSave.reset();
+	placeSave = std::move(save);
 	notifyPlaceSaveChanged();
+	if (placeSave && placeSave->missingElements)
+	{
+		Log("Paste content has missing custom elements", false);
+	}
 }
 
-void GameModel::SetClipboard(GameSave * save)
+void GameModel::TransformPlaceSave(Mat2<int> transform, Vec2<int> nudge)
 {
-	delete clipboard;
-	clipboard = save;
+	if (placeSave)
+	{
+		transformedPlaceSave = std::make_unique<GameSave>(*placeSave);
+		transformedPlaceSave->Transform(transform, nudge);
+	}
+	notifyTransformedPlaceSaveChanged();
 }
 
-GameSave * GameModel::GetClipboard()
+void GameModel::SetClipboard(std::unique_ptr<GameSave> save)
 {
-	return clipboard;
+	Clipboard::SetClipboardData(std::move(save));
 }
 
-GameSave * GameModel::GetPlaceSave()
+const GameSave *GameModel::GetClipboard() const
 {
-	return placeSave;
+	return Clipboard::GetClipboardData();
+}
+
+const GameSave *GameModel::GetTransformedPlaceSave() const
+{
+	return transformedPlaceSave.get();
 }
 
 void GameModel::Log(String message, bool printToFile)
 {
-	consoleLog.push_front(message);
-	if(consoleLog.size()>100)
-		consoleLog.pop_back();
-	notifyLogChanged(message);
+	if (logSink)
+	{
+		logSink(message);
+	}
+	else
+	{
+		consoleLog.push_front(message);
+		if(consoleLog.size()>100)
+			consoleLog.pop_back();
+		notifyLogChanged(message);
+	}
 	if (printToFile)
-		std::cout << message.ToUtf8() << std::endl;
+		std::cout << format::CleanString(message, false, true, false).ToUtf8() << std::endl;
 }
 
 std::deque<String> GameModel::GetLog()
@@ -1538,11 +1343,11 @@ void GameModel::notifyMenuListChanged()
 	}
 }
 
-void GameModel::notifyToolListChanged()
+void GameModel::notifyActiveMenuToolListChanged()
 {
 	for (size_t i = 0; i < observers.size(); i++)
 	{
-		observers[i]->NotifyToolListChanged(this);
+		observers[i]->NotifyActiveMenuToolListChanged(this);
 	}
 }
 
@@ -1575,6 +1380,14 @@ void GameModel::notifyPlaceSaveChanged()
 	for (size_t i = 0; i < observers.size(); i++)
 	{
 		observers[i]->NotifyPlaceSaveChanged(this);
+	}
+}
+
+void GameModel::notifyTransformedPlaceSaveChanged()
+{
+	for (size_t i = 0; i < observers.size(); i++)
+	{
+		observers[i]->NotifyTransformedPlaceSaveChanged(this);
 	}
 }
 
@@ -1647,26 +1460,130 @@ void GameModel::SetPerfectCircle(bool perfectCircle)
 	}
 }
 
-bool GameModel::RemoveCustomGOLType(const ByteString &identifier)
+bool GameModel::AddCustomGol(String ruleString, String nameString, RGB color1, RGB color2)
+{
+	if (auto gd = CheckCustomGol(ruleString, nameString, color1, color2))
+	{
+		auto &sd = SimulationData::Ref();
+		auto newCustomGol = sd.GetCustomGol();
+		newCustomGol.push_back(*gd);
+		sd.SetCustomGOL(newCustomGol);
+		AllocCustomGolTool(*gd);
+		SaveCustomGol();
+		BuildMenus();
+		return true;
+	}
+	return false;
+}
+
+bool GameModel::RemoveCustomGol(const ByteString &identifier)
 {
 	bool removedAny = false;
-	auto &prefs = GlobalPrefs::Ref();
-	auto customGOLTypes = prefs.Get("CustomGOL.Types", std::vector<ByteString>{});
-	std::vector<ByteString> newCustomGOLTypes;
-	for (auto gol : customGOLTypes)
+	std::vector<CustomGOLData> newCustomGol;
+	auto &sd = SimulationData::Ref();
+	for (auto gol : sd.GetCustomGol())
 	{
-		auto parts = gol.PartitionBy(' ');
-		if (parts.size() && "DEFAULT_PT_LIFECUST_" + parts[0] == identifier)
+		if ("DEFAULT_PT_LIFECUST_" + gol.nameString == identifier.FromUtf8())
+		{
 			removedAny = true;
+		}
 		else
-			newCustomGOLTypes.push_back(gol);
+		{
+			newCustomGol.push_back(gol);
+		}
 	}
 	if (removedAny)
 	{
-		prefs.Set("CustomGOL.Types", newCustomGOLTypes);
+		sd.SetCustomGOL(newCustomGol);
+		FreeTool(GetToolFromIdentifier(identifier));
+		BuildMenus();
+		SaveCustomGol();
 	}
-	BuildMenus();
 	return removedAny;
+}
+
+void GameModel::LoadCustomGol()
+{
+	auto &prefs = GlobalPrefs::Ref();
+	auto customGOLTypes = prefs.Get("CustomGOL.Types", std::vector<ByteString>{});
+	bool removedAny = false;
+	std::vector<CustomGOLData> newCustomGol;
+	for (auto gol : customGOLTypes)
+	{
+		auto parts = gol.FromUtf8().PartitionBy(' ');
+		if (parts.size() != 4)
+		{
+			removedAny = true;
+			continue;
+		}
+		auto nameString = parts[0];
+		auto ruleString = parts[1];
+		auto &colour1String = parts[2];
+		auto &colour2String = parts[3];
+		RGB color1;
+		RGB color2;
+		try
+		{
+			color1 = RGB::Unpack(colour1String.ToNumber<int>());
+			color2 = RGB::Unpack(colour2String.ToNumber<int>());
+		}
+		catch (std::exception &)
+		{
+			removedAny = true;
+			continue;
+		}
+		if (auto gd = CheckCustomGol(ruleString, nameString, color1, color2))
+		{
+			newCustomGol.push_back(*gd);
+			AllocCustomGolTool(*gd);
+		}
+		else
+		{
+			removedAny = true;
+		}
+	}
+	auto &sd = SimulationData::Ref();
+	sd.SetCustomGOL(newCustomGol);
+	if (removedAny)
+	{
+		SaveCustomGol();
+	}
+}
+
+void GameModel::SaveCustomGol()
+{
+	auto &prefs = GlobalPrefs::Ref();
+	std::vector<ByteString> newCustomGOLTypes;
+	auto &sd = SimulationData::Ref();
+	for (auto &gd : sd.GetCustomGol())
+	{
+		StringBuilder sb;
+		sb << gd.nameString << " " << SerialiseGOLRule(gd.rule) << " " << gd.colour1.Pack() << " " << gd.colour2.Pack();
+		newCustomGOLTypes.push_back(sb.Build().ToUtf8());
+	}
+	prefs.Set("CustomGOL.Types", newCustomGOLTypes);
+}
+
+std::optional<CustomGOLData> GameModel::CheckCustomGol(String ruleString, String nameString, RGB color1, RGB color2)
+{
+	if (!ValidateGOLName(nameString))
+	{
+		return std::nullopt;
+	}
+	auto rule = ParseGOLString(ruleString);
+	if (rule == -1)
+	{
+		return std::nullopt;
+	}
+	auto &sd = SimulationData::Ref();
+	for (auto &gd : sd.GetCustomGol())
+	{
+		if (gd.nameString == nameString)
+		{
+			return std::nullopt;
+		}
+	}
+	return CustomGOLData{ rule, color1, color2, nameString };
 }
 
 void GameModel::UpdateUpTo(int upTo)
@@ -1680,6 +1597,10 @@ void GameModel::UpdateUpTo(int upTo)
 		BeforeSim();
 	}
 	sim->UpdateParticles(sim->debug_nextToUpdate, upTo);
+	if (queuedFrames)
+	{
+		queuedFrames--;
+	}
 	if (upTo < NPART)
 	{
 		sim->debug_nextToUpdate = upTo;
@@ -1693,15 +1614,244 @@ void GameModel::UpdateUpTo(int upTo)
 
 void GameModel::BeforeSim()
 {
-	if (!sim->sys_pause || sim->framerender)
+	auto willUpdate = IsSimRunning();
+	if (willUpdate)
 	{
-		commandInterface->HandleEvent(BeforeSimEvent{});
+		CommandInterface::Ref().HandleEvent(BeforeSimEvent{});
 	}
-	sim->BeforeSim();
+	sim->BeforeSim(willUpdate);
 }
 
 void GameModel::AfterSim()
 {
 	sim->AfterSim();
-	commandInterface->HandleEvent(AfterSimEvent{});
+	CommandInterface::Ref().HandleEvent(AfterSimEvent{});
+}
+
+Tool *GameModel::GetToolByIndex(int index)
+{
+	if (index < 0 || index >= int(tools.size()))
+	{
+		return nullptr;
+	}
+	return tools[index].get();
+}
+
+void GameModel::SanitizeToolsets()
+{
+	if (!decoToolset   [0]) decoToolset   [0] = GetToolFromIdentifier("DEFAULT_DECOR_SET");
+	if (!decoToolset   [1]) decoToolset   [1] = GetToolFromIdentifier("DEFAULT_DECOR_CLR");
+	if (!decoToolset   [2]) decoToolset   [2] = GetToolFromIdentifier("DEFAULT_UI_SAMPLE");
+	if (!decoToolset   [3]) decoToolset   [3] = GetToolFromIdentifier("DEFAULT_PT_NONE"  );
+	if (!regularToolset[0]) regularToolset[0] = GetToolFromIdentifier("DEFAULT_PT_DUST"  );
+	if (!regularToolset[1]) regularToolset[1] = GetToolFromIdentifier("DEFAULT_PT_NONE"  );
+	if (!regularToolset[2]) regularToolset[2] = GetToolFromIdentifier("DEFAULT_UI_SAMPLE");
+	if (!regularToolset[3]) regularToolset[3] = GetToolFromIdentifier("DEFAULT_PT_NONE"  );
+	if (!lastTool)
+	{
+		lastTool = activeTools[0];
+	}
+}
+
+void GameModel::DeselectTool(ByteString identifier)
+{
+	auto *tool = GetToolFromIdentifier(identifier);
+	for (auto &slot : decoToolset)
+	{
+		if (slot == tool)
+		{
+			slot = nullptr;
+		}
+	}
+	for (auto &slot : regularToolset)
+	{
+		if (slot == tool)
+		{
+			slot = nullptr;
+		}
+	}
+	if (lastTool == tool)
+	{
+		lastTool = nullptr;
+	}
+	SanitizeToolsets();
+}
+
+void GameModel::AllocTool(std::unique_ptr<Tool> tool)
+{
+	std::optional<int> index;
+	for (int i = 0; i < int(tools.size()); ++i)
+	{
+		if (!tools[i])
+		{
+			index = i;
+			break;
+		}
+	}
+	if (!index)
+	{
+		index = int(tools.size());
+		tools.emplace_back();
+	}
+	GameController::Ref().SetToolIndex(tool->Identifier, *index);
+	tools[*index] = std::move(tool);
+}
+
+void GameModel::FreeTool(Tool *tool)
+{
+	auto index = GetToolIndex(tool);
+	if (!index)
+	{
+		return;
+	}
+	auto &ptr = tools[*index];
+	DeselectTool(ptr->Identifier);
+	GameController::Ref().SetToolIndex(ptr->Identifier, std::nullopt);
+	ptr.reset();
+}
+
+std::optional<int> GameModel::GetToolIndex(Tool *tool)
+{
+	if (tool)
+	{
+		for (int i = 0; i < int(tools.size()); ++i)
+		{
+			if (tools[i].get() == tool)
+			{
+				return i;
+			}
+		}
+	}
+	return std::nullopt;
+}
+
+void GameModel::AllocCustomGolTool(const CustomGOLData &gd)
+{
+	auto tool = std::make_unique<ElementTool>(PMAP(gd.rule, PT_LIFE), gd.nameString, "Custom GOL type: " + SerialiseGOLRule(gd.rule), gd.colour1, "DEFAULT_PT_LIFECUST_" + gd.nameString.ToAscii(), nullptr);
+	tool->MenuSection = SC_LIFE;
+	AllocTool(std::move(tool));
+}
+
+void GameModel::UpdateElementTool(int element)
+{
+	auto &sd = SimulationData::Ref();
+	auto &elements = sd.elements;
+	auto &elem = elements[element];
+	auto *tool = GetToolFromIdentifier(elem.Identifier);
+	tool->Name = elem.Name;
+	tool->Description = elem.Description;
+	tool->Colour = elem.Colour;
+	tool->textureGen = elem.IconGenerator;
+	tool->MenuSection = elem.MenuSection;
+	tool->MenuVisible = elem.MenuVisible;
+}
+
+void GameModel::AllocElementTool(int element)
+{
+	auto &sd = SimulationData::Ref();
+	auto &elements = sd.elements;
+	auto &elem = elements[element];
+	switch (element)
+	{
+	case PT_LIGH:
+		AllocTool(std::make_unique<Element_LIGH_Tool>(element, elem.Identifier));
+		break;
+
+	case PT_TESC:
+		AllocTool(std::make_unique<Element_TESC_Tool>(element, elem.Identifier));
+		break;
+
+	case PT_STKM:
+	case PT_FIGH:
+	case PT_STKM2:
+		AllocTool(std::make_unique<PlopTool>(element, elem.Identifier));
+		break;
+
+	default:
+		AllocTool(std::make_unique<ElementTool>(element, elem.Identifier));
+		break;
+	}
+	UpdateElementTool(element);
+}
+
+void GameModel::InitTools()
+{
+	auto &sd = SimulationData::Ref();
+	auto &elements = sd.elements;
+	auto &builtinGol = SimulationData::builtinGol;
+	for (int i = 0; i < PT_NUM; ++i)
+	{
+		if (elements[i].Enabled)
+		{
+			AllocElementTool(i);
+		}
+	}
+	for (int i = 0; i < NGOL; ++i)
+	{
+		auto tool = std::make_unique<ElementTool>(PMAP(i, PT_LIFE), builtinGol[i].name, builtinGol[i].description, builtinGol[i].colour, "DEFAULT_PT_LIFE_" + builtinGol[i].name.ToAscii());
+		tool->MenuSection = SC_LIFE;
+		AllocTool(std::move(tool));
+	}
+	for (int i = 0; i < UI_WALLCOUNT; ++i)
+	{
+		auto tool = std::make_unique<WallTool>(i, sd.wtypes[i].descs, sd.wtypes[i].colour, sd.wtypes[i].identifier, sd.wtypes[i].textureGen);
+		tool->MenuSection = SC_WALL;
+		AllocTool(std::move(tool));
+	}
+	for (auto &tool : ::GetTools())
+	{
+		AllocTool(std::make_unique<SimTool>(tool));
+	}
+	AllocTool(std::make_unique<DecorationTool>(view, DECO_ADD     , "ADD" , "Colour blending: Add."                         , 0x000000_rgb, "DEFAULT_DECOR_ADD" ));
+	AllocTool(std::make_unique<DecorationTool>(view, DECO_SUBTRACT, "SUB" , "Colour blending: Subtract."                    , 0x000000_rgb, "DEFAULT_DECOR_SUB" ));
+	AllocTool(std::make_unique<DecorationTool>(view, DECO_MULTIPLY, "MUL" , "Colour blending: Multiply."                    , 0x000000_rgb, "DEFAULT_DECOR_MUL" ));
+	AllocTool(std::make_unique<DecorationTool>(view, DECO_DIVIDE  , "DIV" , "Colour blending: Divide."                      , 0x000000_rgb, "DEFAULT_DECOR_DIV" ));
+	AllocTool(std::make_unique<DecorationTool>(view, DECO_SMUDGE  , "SMDG", "Smudge tool, blends surrounding deco together.", 0x000000_rgb, "DEFAULT_DECOR_SMDG"));
+	AllocTool(std::make_unique<DecorationTool>(view, DECO_CLEAR   , "CLR" , "Erase any set decoration."                     , 0x000000_rgb, "DEFAULT_DECOR_CLR" ));
+	AllocTool(std::make_unique<DecorationTool>(view, DECO_DRAW    , "SET" , "Draw decoration (No blending)."                , 0x000000_rgb, "DEFAULT_DECOR_SET" ));
+	AllocTool(std::make_unique<PropertyTool>(*this));
+	AllocTool(std::make_unique<SignTool>(*this));
+	AllocTool(std::make_unique<SampleTool>(*this));
+	AllocTool(std::make_unique<GOLTool>(*this));
+	LoadCustomGol();
+
+	SanitizeToolsets();
+	lastTool = activeTools[0];
+	BuildMenus();
+}
+
+void GameModel::BuildMenus()
+{
+	auto &sd = SimulationData::Ref();
+
+	menuList.clear();
+	for (auto &section : sd.msections)
+	{
+		menuList.push_back(std::make_unique<Menu>(section.icon, section.name, section.doshow));
+	}
+
+	for (auto &tool : tools)
+	{
+		if (!tool)
+		{
+			continue;
+		}
+		if (tool->MenuSection >= 0 && tool->MenuSection < int(sd.msections.size()) && tool->MenuVisible)
+		{
+			menuList[tool->MenuSection]->AddTool(tool.get());
+		}
+	}
+
+	for (auto &fav : Favorite::Ref().GetFavoritesList())
+	{
+		if (auto *tool = GetToolFromIdentifier(fav))
+		{
+			menuList[SC_FAVORITES]->AddTool(tool);
+		}
+	}
+
+	notifyMenuListChanged();
+	notifyActiveMenuToolListChanged();
+	notifyActiveToolsChanged();
+	notifyLastToolChanged();
 }
