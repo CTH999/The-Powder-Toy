@@ -1,10 +1,13 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_CBNW PT_CBNW 82
-Element_CBNW::Element_CBNW()
+#include "simulation/ElementCommon.h"
+
+static int update(UPDATE_FUNC_ARGS);
+static int graphics(GRAPHICS_FUNC_ARGS);
+
+void Element::Element_CBNW()
 {
 	Identifier = "DEFAULT_PT_CBNW";
 	Name = "BUBW";
-	Colour = PIXPACK(0x2030D0);
+	Colour = 0x2030D0_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_LIQUID;
 	Enabled = 1;
@@ -26,7 +29,7 @@ Element_CBNW::Element_CBNW()
 
 	Weight = 30;
 
-	Temperature = R_TEMP-2.0f	+273.15f;
+	DefaultProperties.temp = R_TEMP - 2.0f + 273.15f;
 	HeatConduct = 29;
 	Description = "Carbonated water. Slowly releases CO2.";
 
@@ -41,17 +44,17 @@ Element_CBNW::Element_CBNW()
 	HighTemperature = 373.0f;
 	HighTemperatureTransition = PT_WTRV;
 
-	Update = &Element_CBNW::update;
-	Graphics = &Element_CBNW::graphics;
+	Update = &update;
+	Graphics = &graphics;
 }
 
-//#TPT-Directive ElementHeader Element_CBNW static int update(UPDATE_FUNC_ARGS)
-int Element_CBNW::update(UPDATE_FUNC_ARGS)
+static int update(UPDATE_FUNC_ARGS)
 {
-	int r, rx, ry;
+	auto &sd = SimulationData::CRef();
+	auto &elements = sd.elements;
 	if (sim->pv[y/CELL][x/CELL]<=3)
 	{
-		if (sim->pv[y/CELL][x/CELL] <= -0.5 || RNG::Ref().chance(1, 4000))
+		if (sim->pv[y/CELL][x/CELL] <= -0.5 || sim->rng.chance(1, 4000))
 		{
 			sim->part_change_type(i,x,y,PT_CO2);
 			parts[i].ctype = 5;
@@ -61,15 +64,15 @@ int Element_CBNW::update(UPDATE_FUNC_ARGS)
 	if (parts[i].tmp2!=20) {
 		parts[i].tmp2 -= (parts[i].tmp2>20)?1:-1;
 	}
-	else if (RNG::Ref().chance(1, 200))
+	else if (sim->rng.chance(1, 200))
 	{
-		parts[i].tmp2 = RNG::Ref().between(0, 39);
+		parts[i].tmp2 = sim->rng.between(0, 39);
 	}
 
 	if(parts[i].tmp>0)
 	{
 		//Explode
-		if(parts[i].tmp==1 && RNG::Ref().chance(3, 4))
+		if(parts[i].tmp==1 && sim->rng.chance(3, 4))
 		{
 			sim->part_change_type(i,x,y,PT_CO2);
 			parts[i].ctype = 5;
@@ -77,19 +80,21 @@ int Element_CBNW::update(UPDATE_FUNC_ARGS)
 		}
 		parts[i].tmp--;
 	}
-	for (rx=-1; rx<2; rx++)
-		for (ry=-1; ry<2; ry++)
-			if (BOUNDS_CHECK && (rx || ry))
+	for (auto rx = -1; rx <= 1; rx++)
+	{
+		for (auto ry = -1; ry <= 1; ry++)
+		{
+			if (rx || ry)
 			{
-				r = pmap[y+ry][x+rx];
+				auto r = pmap[y+ry][x+rx];
 				if (!r)
 					continue;
-				if ((sim->elements[TYP(r)].Properties&TYPE_PART) && parts[i].tmp == 0 && RNG::Ref().chance(1, 83))
+				if ((elements[TYP(r)].Properties&TYPE_PART) && parts[i].tmp == 0 && sim->rng.chance(1, 83))
 				{
 					//Start explode
-					parts[i].tmp = RNG::Ref().between(0, 24);
+					parts[i].tmp = sim->rng.between(0, 24);
 				}
-				else if((sim->elements[TYP(r)].Properties&TYPE_SOLID) && TYP(r)!=PT_DMND && TYP(r)!=PT_GLAS && parts[i].tmp == 0 && RNG::Ref().chance(2 - sim->pv[y/CELL][x/CELL], 6667))
+				else if((elements[TYP(r)].Properties&TYPE_SOLID) && TYP(r)!=PT_DMND && TYP(r)!=PT_GLAS && parts[i].tmp == 0 && sim->rng.chance(int(2 - sim->pv[y/CELL][x/CELL]), 6667))
 				{
 					sim->part_change_type(i,x,y,PT_CO2);
 					parts[i].ctype = 5;
@@ -115,7 +120,7 @@ int Element_CBNW::update(UPDATE_FUNC_ARGS)
 				}
 				else if (TYP(r)==PT_RBDM||TYP(r)==PT_LRBD)
 				{
-					if ((sim->legacy_enable||parts[i].temp>(273.15f+12.0f)) && RNG::Ref().chance(1, 166))
+					if ((sim->legacy_enable||parts[i].temp>(273.15f+12.0f)) && sim->rng.chance(1, 166))
 					{
 						sim->part_change_type(i,x,y,PT_FIRE);
 						parts[i].life = 4;
@@ -124,20 +129,19 @@ int Element_CBNW::update(UPDATE_FUNC_ARGS)
 				}
 				else if (TYP(r)==PT_FIRE && parts[ID(r)].ctype!=PT_WATR){
 					sim->kill_part(ID(r));
-					if (RNG::Ref().chance(1, 50))
+					if (sim->rng.chance(1, 50))
 					{
 						sim->kill_part(i);
 						return 1;
 					}
 				}
 			}
+		}
+	}
 	return 0;
 }
 
-
-//#TPT-Directive ElementHeader Element_CBNW static int graphics(GRAPHICS_FUNC_ARGS)
-int Element_CBNW::graphics(GRAPHICS_FUNC_ARGS)
-
+static int graphics(GRAPHICS_FUNC_ARGS)
 {
 	int z = cpart->tmp2 - 20;//speckles!
 	*colr += z * 1;
@@ -145,6 +149,3 @@ int Element_CBNW::graphics(GRAPHICS_FUNC_ARGS)
 	*colb += z * 8;
 	return 0;
 }
-
-
-Element_CBNW::~Element_CBNW() {}

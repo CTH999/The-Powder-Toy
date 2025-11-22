@@ -1,10 +1,13 @@
 #include "TagsController.h"
-#include "gui/interface/Engine.h"
-
 #include "TagsModel.h"
 #include "TagsView.h"
+#include "client/http/AddTagRequest.h"
+#include "client/http/RemoveTagRequest.h"
+#include "gui/interface/Engine.h"
+#include "client/SaveInfo.h"
+#include "Controller.h"
 
-TagsController::TagsController(ControllerCallback * callback, SaveInfo * save):
+TagsController::TagsController(std::function<void ()> onDone_, SaveInfo * save):
 	HasDone(false)
 {
 	tagsModel = new TagsModel();
@@ -14,7 +17,7 @@ TagsController::TagsController(ControllerCallback * callback, SaveInfo * save):
 
 	tagsModel->SetSave(save);
 
-	this->callback = callback;
+	onDone = onDone_;
 }
 
 SaveInfo * TagsController::GetSave()
@@ -33,19 +36,23 @@ void TagsController::AddTag(ByteString tag)
 	tagsModel->AddTag(tag);
 }
 
+void TagsController::Tick()
+{
+	tagsModel->Tick();
+}
+
 void TagsController::Exit()
 {
 	tagsView->CloseActiveWindow();
-	if(callback)
-		callback->ControllerExit();
+	if (onDone)
+		onDone();
 	HasDone = true;
 }
 
 TagsController::~TagsController()
 {
-	tagsView->CloseActiveWindow();
 	delete tagsModel;
+	tagsView->CloseActiveWindow();
 	delete tagsView;
-	delete callback;
 }
 

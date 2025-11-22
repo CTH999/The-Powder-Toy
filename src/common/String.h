@@ -1,5 +1,5 @@
 #pragma once
-
+#include <algorithm>
 #include <stdexcept>
 #include <sstream>
 #include <vector>
@@ -244,7 +244,7 @@ public:
 	inline bool Contains(ByteString const &other) const { return super::find(other) != npos; }
 
 	inline bool BeginsWith(ByteString const &other) const { return !super::compare(0, other.size(), other); }
-	inline bool EndsWith(ByteString const &other) const { return !super::compare(size() - other.size(), other.size(), other); }
+	inline bool EndsWith(ByteString const &other) const { return size() >= other.size() && !super::compare(size() - other.size(), other.size(), other); }
 
 	using Split = SplitBase<ByteString>;
 	inline Split SplitBy(value_type ch, size_t pos = 0) const { return Split(*this, pos, super::find(ch, pos), 1, false); }
@@ -417,7 +417,7 @@ public:
 	inline bool Contains(String const &other) const { return super::find(other) != npos; }
 
 	inline bool BeginsWith(String const &other) const { return !super::compare(0, other.size(), other); }
-	inline bool EndsWith(String const &other) const { return !super::compare(size() - other.size(), other.size(), other); }
+	inline bool EndsWith(String const &other) const { return size() >= other.size() && !super::compare(size() - other.size(), other.size(), other); }
 
 	using Split = SplitBase<String>;
 	inline Split SplitBy(value_type ch, size_t pos = 0) const { return Split(*this, pos, super::find(ch, pos), 1, false); }
@@ -509,7 +509,7 @@ public:
 		std::locale const &loc = std::locale::classic();
 		String value(*this);
 		for(value_type &ch : value)
-			if(ch <= std::numeric_limits<ByteString::value_type>::max())
+			if(ch <= static_cast<value_type>(std::numeric_limits<ByteString::value_type>::max()))
 				ch = std::tolower(static_cast<ByteString::value_type>(ch), loc);
 		return value;
 	}
@@ -519,7 +519,7 @@ public:
 		std::locale const &loc = std::locale::classic();
 		String value(*this);
 		for(value_type &ch : value)
-			if(ch <= std::numeric_limits<ByteString::value_type>::max())
+			if(ch <= static_cast<value_type>(std::numeric_limits<ByteString::value_type>::max()))
 				ch = std::toupper(static_cast<ByteString::value_type>(ch), loc);
 		return value;
 	}

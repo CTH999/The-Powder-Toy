@@ -1,10 +1,13 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_AMTR PT_AMTR 72
-Element_AMTR::Element_AMTR()
+#include "simulation/ElementCommon.h"
+
+static int update(UPDATE_FUNC_ARGS);
+static int graphics(GRAPHICS_FUNC_ARGS);
+
+void Element::Element_AMTR()
 {
 	Identifier = "DEFAULT_PT_AMTR";
 	Name = "AMTR";
-	Colour = PIXPACK(0x808080);
+	Colour = 0x808080_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_NUCLEAR;
 	Enabled = 1;
@@ -26,7 +29,6 @@ Element_AMTR::Element_AMTR()
 
 	Weight = 100;
 
-	Temperature = R_TEMP+0.0f +273.15f;
 	HeatConduct = 70;
 	Description = "Anti-Matter, destroys a majority of particles.";
 
@@ -41,22 +43,22 @@ Element_AMTR::Element_AMTR()
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
 
-	Update = &Element_AMTR::update;
-	Graphics = &Element_AMTR::graphics;
+	Update = &update;
+	Graphics = &graphics;
 }
 
-//#TPT-Directive ElementHeader Element_AMTR static int update(UPDATE_FUNC_ARGS)
-int Element_AMTR::update(UPDATE_FUNC_ARGS)
+static int update(UPDATE_FUNC_ARGS)
 {
-	int r, rx, ry, rt;
-	for (rx=-1; rx<2; rx++)
-		for (ry=-1; ry<2; ry++)
-			if (BOUNDS_CHECK && (rx || ry))
+	for (auto rx = -1; rx <= 1; rx++)
+	{
+		for (auto ry = -1; ry <= 1; ry++)
+		{
+			if (rx || ry)
 			{
-				r = pmap[y+ry][x+rx];
+				auto r = pmap[y+ry][x+rx];
 				if (!r)
 					continue;
-				rt = TYP(r);
+				auto rt = TYP(r);
 				if (rt!=PT_AMTR && rt!=PT_DMND && rt!=PT_CLNE && rt!=PT_PCLN && rt!=PT_VOID && rt!=PT_BHOL && rt!=PT_NBHL && rt!=PT_PRTI && rt!=PT_PRTO)
 				{
 					parts[i].life++;
@@ -65,23 +67,21 @@ int Element_AMTR::update(UPDATE_FUNC_ARGS)
 						sim->kill_part(i);
 						return 1;
 					}
-					if (RNG::Ref().chance(1, 10))
+					if (sim->rng.chance(1, 10))
 						sim->create_part(ID(r), x+rx, y+ry, PT_PHOT);
 					else
 						sim->kill_part(ID(r));
 					sim->pv[y/CELL][x/CELL] -= 2.0f;
 				}
 			}
+		}
+	}
 	return 0;
 }
 
-
-//#TPT-Directive ElementHeader Element_AMTR static int graphics(GRAPHICS_FUNC_ARGS)
-int Element_AMTR::graphics(GRAPHICS_FUNC_ARGS)
+static int graphics(GRAPHICS_FUNC_ARGS)
 {
 	// don't render AMTR as a gas
 	// this function just overrides the default graphics
 	return 1;
 }
-
-Element_AMTR::~Element_AMTR() {}

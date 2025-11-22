@@ -1,23 +1,19 @@
-#ifndef CONSOLECONTROLLER_H_
-#define CONSOLECONTROLLER_H_
-
+#pragma once
 #include "common/String.h"
-#include "Controller.h"
-#include "ConsoleView.h"
-#include "ConsoleModel.h"
-#include "ConsoleCommand.h"
-#include "lua/CommandInterface.h"
+#include <functional>
 
+class CommandInterface;
 class ConsoleModel;
 class ConsoleView;
-class ConsoleController {
-	ControllerCallback * callback;
+class ConsoleController
+{
 	ConsoleView * consoleView;
 	ConsoleModel * consoleModel;
 	CommandInterface * commandInterface;
+	std::function<void ()> onDone;
 public:
 	bool HasDone;
-	ConsoleController(ControllerCallback * callback, CommandInterface * commandInterface);
+	ConsoleController(std::function<void ()> onDone, CommandInterface * commandInterface);
 	String FormatCommand(String command);
 	void EvaluateCommand(String command);
 	void NextCommand();
@@ -27,5 +23,3 @@ public:
 	ConsoleView * GetView();
 	virtual ~ConsoleController();
 };
-
-#endif /* CONSOLECONTROLLER_H_ */

@@ -1,12 +1,9 @@
-#ifndef FAVORITE_H
-#define FAVORITE_H
-
+#pragma once
 #include "common/String.h"
+#include "common/ExplicitSingleton.h"
 #include <vector>
 
-#include "common/Singleton.h"
-
-class Favorite : public Singleton<Favorite>
+class Favorite : public ExplicitSingleton<Favorite>
 {
 	std::vector<ByteString> favoritesList;
 public:
@@ -22,4 +19,3 @@ public:
 	void SaveFavoritesToPrefs();
 	void LoadFavoritesFromPrefs();
 };
-#endif //FAVORITE_H

@@ -1,34 +1,29 @@
-#ifndef SAVEFILE_H_
-#define SAVEFILE_H_
-
+#pragma once
 #include "common/String.h"
+#include <memory>
 
 class GameSave;
-class Thumbnail;
 
 class SaveFile {
 public:
-	SaveFile(SaveFile & save);
-	SaveFile(ByteString filename);
+	SaveFile(ByteString filename, bool newLazyLoad = false);
 
-	Thumbnail * GetThumbnail();
-	GameSave * GetGameSave();
-	void SetThumbnail(Thumbnail * thumb);
-	void SetGameSave(GameSave * save);
-	String GetDisplayName();
+	const GameSave *LazyGetGameSave();
+	const GameSave *GetGameSave() const;
+	std::unique_ptr<GameSave> TakeGameSave();
+	void SetGameSave(std::unique_ptr<GameSave> newSameSave);
+	const String &GetDisplayName() const;
 	void SetDisplayName(String displayName);
-	ByteString GetName();
+	const ByteString &GetName() const;
 	void SetFileName(ByteString fileName);
-	String GetError();
+	const String &GetError() const;
 	void SetLoadingError(String error);
 
-	virtual ~SaveFile();
+	void LazyUnload();
 private:
-	Thumbnail * thumbnail;
-	GameSave * gameSave;
+	std::unique_ptr<GameSave> gameSave;
 	ByteString filename;
 	String displayName;
 	String loadingError;
+	bool lazyLoad;
 };
-
-#endif /* SAVEFILE_H_ */
