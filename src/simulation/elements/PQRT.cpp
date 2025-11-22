@@ -1,14 +1,17 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_PQRT PT_PQRT 133
-Element_PQRT::Element_PQRT()
+#include "simulation/ElementCommon.h"
+#include "QRTZ.h"
+
+static void create(ELEMENT_CREATE_FUNC_ARGS);
+
+void Element::Element_PQRT()
 {
 	Identifier = "DEFAULT_PT_PQRT";
 	Name = "PQRT";
-	Colour = PIXPACK(0x88BBBB);
+	Colour = 0x88BBBB_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_POWDERS;
 	Enabled = 1;
-	
+
 	Advection = 0.4f;
 	AirDrag = 0.04f * CFDS;
 	AirLoss = 0.94f;
@@ -18,21 +21,19 @@ Element_PQRT::Element_PQRT()
 	Diffusion = 0.00f;
 	HotAir = 0.000f	* CFDS;
 	Falldown = 1;
-	
+
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 0;
 	Hardness = 0;
-	
+
 	Weight = 90;
-	
-	Temperature = R_TEMP+273.15f;
+
 	HeatConduct = 3;
 	Description = "Powdered quartz, broken form of QRTZ.";
-	
-	State = ST_SOLID;
-	Properties = TYPE_PART| PROP_HOT_GLOW;
-	
+
+	Properties = TYPE_PART | PROP_PHOTPASS | PROP_HOT_GLOW;
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;
@@ -41,9 +42,13 @@ Element_PQRT::Element_PQRT()
 	LowTemperatureTransition = NT;
 	HighTemperature = 2573.15f;
 	HighTemperatureTransition = PT_LAVA;
-	
-	Update = &Element_QRTZ::update;
-	Graphics = &Element_QRTZ::graphics;
+
+	Update = &Element_QRTZ_update;
+	Graphics = &Element_QRTZ_graphics;
+	Create = &create;
 }
 
-Element_PQRT::~Element_PQRT() {}
+static void create(ELEMENT_CREATE_FUNC_ARGS)
+{
+	sim->parts[i].tmp2 = sim->rng.between(0, 10);
+}

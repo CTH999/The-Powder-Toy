@@ -1,14 +1,14 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_BHOL PT_BHOL 39
-Element_BHOL::Element_BHOL()
+#include "simulation/ElementCommon.h"
+
+void Element::Element_BHOL()
 {
 	Identifier = "DEFAULT_PT_BHOL";
 	Name = "VACU";
-	Colour = PIXPACK(0x303030);
+	Colour = 0x303030_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_SPECIAL;
 	Enabled = 1;
-	
+
 	Advection = 0.0f;
 	AirDrag = 0.00f * CFDS;
 	AirLoss = 0.95f;
@@ -18,21 +18,20 @@ Element_BHOL::Element_BHOL()
 	Diffusion = 0.00f;
 	HotAir = -0.01f	* CFDS;
 	Falldown = 0;
-	
+
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 0;
 	Hardness = 0;
-	
+
 	Weight = 100;
-	
-	Temperature = R_TEMP+70.0f+273.15f;
+
+	DefaultProperties.temp = R_TEMP + 70.0f + 273.15f;
 	HeatConduct = 255;
 	Description = "Vacuum, sucks in other particles and heats up.";
-	
-	State = ST_NONE;
+
 	Properties = TYPE_SOLID;
-	
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;
@@ -41,9 +40,4 @@ Element_BHOL::Element_BHOL()
 	LowTemperatureTransition = NT;
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
-	
-	Update = NULL;
-	
 }
-
-Element_BHOL::~Element_BHOL() {}

@@ -1,14 +1,14 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_WHOL PT_WHOL 40
-Element_WHOL::Element_WHOL()
+#include "simulation/ElementCommon.h"
+
+void Element::Element_WHOL()
 {
 	Identifier = "DEFAULT_PT_WHOL";
 	Name = "VENT";
-	Colour = PIXPACK(0xEFEFEF);
+	Colour = 0xEFEFEF_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_SPECIAL;
 	Enabled = 1;
-	
+
 	Advection = 0.0f;
 	AirDrag = 0.00f * CFDS;
 	AirLoss = 0.95f;
@@ -18,21 +18,20 @@ Element_WHOL::Element_WHOL()
 	Diffusion = 0.00f;
 	HotAir = 0.010f	* CFDS;
 	Falldown = 0;
-	
+
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 0;
 	Hardness = 0;
-	
+
 	Weight = 100;
-	
-	Temperature = R_TEMP-16.0f+273.15f;
+
+	DefaultProperties.temp = R_TEMP - 16.0f + 273.15f;
 	HeatConduct = 255;
 	Description = "Air vent, creates pressure and pushes other particles away.";
-	
-	State = ST_NONE;
+
 	Properties = TYPE_SOLID;
-	
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;
@@ -41,9 +40,4 @@ Element_WHOL::Element_WHOL()
 	LowTemperatureTransition = NT;
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
-	
-	Update = NULL;
-	
 }
-
-Element_WHOL::~Element_WHOL() {}

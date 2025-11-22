@@ -1,14 +1,17 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_VRSG PT_VRSG 176
-Element_VRSG::Element_VRSG()
+#include "simulation/ElementCommon.h"
+#include "VIRS.h"
+
+static int graphics(GRAPHICS_FUNC_ARGS);
+
+void Element::Element_VRSG()
 {
 	Identifier = "DEFAULT_PT_VRSG";
 	Name = "VRSG";
-	Colour = PIXPACK(0xFE68FE);
+	Colour = 0xFE68FE_rgb;
 	MenuVisible = 0;
 	MenuSection = SC_GAS;
 	Enabled = 1;
-	
+
 	Advection = 1.0f;
 	AirDrag = 0.01f * CFDS;
 	AirLoss = 0.99f;
@@ -18,21 +21,21 @@ Element_VRSG::Element_VRSG()
 	Diffusion = 0.75f;
 	HotAir = 0.000f	* CFDS;
 	Falldown = 0;
-	
+
 	Flammable = 500;
 	Explosive = 0;
 	Meltable = 0;
 	Hardness = 0;
-	
+
 	Weight = 1;
-	
-	Temperature = 522.0f + 273.15f;
+
+	DefaultProperties.temp = 522.0f + 273.15f;
 	HeatConduct = 251;
 	Description = "Gas Virus. Turns everything it touches into virus.";
-	
-	State = ST_GAS;
+
 	Properties = TYPE_GAS|PROP_DEADLY;
-	
+	CarriesTypeIn = 1U << FIELD_TMP2;
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;
@@ -41,14 +44,14 @@ Element_VRSG::Element_VRSG()
 	LowTemperatureTransition = PT_VIRS;
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
-	
-	Update = &Element_VIRS::update;
-	Graphics = &Element_VRSG::graphics;
+
+	DefaultProperties.tmp4 = 250;
+
+	Update = &Element_VIRS_update;
+	Graphics = &graphics;
 }
 
-
-//#TPT-Directive ElementHeader Element_VRSG static int graphics(GRAPHICS_FUNC_ARGS)
-int Element_VRSG::graphics(GRAPHICS_FUNC_ARGS)
+static int graphics(GRAPHICS_FUNC_ARGS)
 {
 	*pixel_mode &= ~PMODE;
 	*pixel_mode |= FIRE_BLEND;
@@ -59,5 +62,3 @@ int Element_VRSG::graphics(GRAPHICS_FUNC_ARGS)
 	*pixel_mode |= NO_DECO;
 	return 1;
 }
-
-Element_VRSG::~Element_VRSG() {}

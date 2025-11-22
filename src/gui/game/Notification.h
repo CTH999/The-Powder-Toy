@@ -1,16 +1,12 @@
-#ifndef NOTIFICATION_H_
-#define NOTIFICATION_H_
-
-#include <string>
+#pragma once
+#include "common/String.h"
 
 class Notification
 {
 public:
-	Notification(std::string message) : Message(message) {}
+	Notification(String message) : Message(message) {}
 	virtual ~Notification() {};
-	std::string Message;
+	String Message;
 
 	virtual void Action() { }
 };
-
-#endif /* NOTIFICATION_H_ */

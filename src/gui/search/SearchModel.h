@@ -1,31 +1,42 @@
-#ifndef SEARCHMODEL_H
-#define SEARCHMODEL_H
-
+#pragma once
+#include "common/String.h"
+#include "client/Search.h"
+#include "Config.h"
 #include <vector>
-#include <string>
-#include <pthread.h>
-#undef GetUserName //God dammit microsoft!
-#include <cmath>
-#include "client/SaveInfo.h"
-#include "SearchView.h"
+#include <atomic>
+#include <memory>
 
-using namespace std;
+namespace http
+{
+	class SearchSavesRequest;
+	class SearchTagsRequest;
+}
 
+class SaveInfo;
 class SearchView;
 class SearchModel
 {
 private:
-	SaveInfo * loadedSave;
-	string currentSort;
-	string lastQuery;
-	string lastError;
-	vector<int> selected;
-	vector<SearchView*> observers;
-	vector<SaveInfo*> saveList;
-	vector<pair<string, int> > tagList;
+	std::unique_ptr<http::SearchSavesRequest> searchSaves;
+	void BeginSearchSaves(int start, int count, String query, http::Period period, http::Sort sort, http::Category category);
+	std::vector<std::unique_ptr<SaveInfo>> EndSearchSaves();
+
+	void BeginGetTags(int start, int count, String query);
+	std::vector<std::pair<ByteString, int>> EndGetTags();
+	std::unique_ptr<http::SearchTagsRequest> getTags;
+
+	std::unique_ptr<SaveInfo> loadedSave;
+	http::Period currentPeriod;
+	http::Sort currentSort;
+	String lastQuery;
+	String lastError;
+	std::vector<int> selected;
+	std::vector<SearchView*> observers;
+	std::vector<std::unique_ptr<SaveInfo>> saveList;
+	std::vector<std::pair<ByteString, int> > tagList;
 	int currentPage;
 	int resultCount;
-	int thResultCount;
+	bool includesFp;
 	bool showOwn;
 	bool showFavourite;
 	bool showTags;
@@ -33,57 +44,42 @@ private:
 	void notifyTagListChanged();
 	void notifySelectedChanged();
 	void notifyPageChanged();
+	void notifyPeriodChanged();
 	void notifySortChanged();
 	void notifyShowOwnChanged();
 	void notifyShowFavouriteChanged();
 
 	//Variables and methods for background save request
-	bool saveListLoaded;
-	bool updateSaveListWorking;
-	volatile bool updateSaveListFinished;
-	pthread_t updateSaveListThread;
-	TH_ENTRY_POINT static void * updateSaveListTHelper(void * obj);
-	void * updateSaveListT();
-
-	bool updateTagListWorking;
-	volatile bool updateTagListFinished;
-	pthread_t updateTagListThread;
-	TH_ENTRY_POINT static void * updateTagListTHelper(void * obj);
-	void * updateTagListT();
+	bool saveListLoaded = false;
 public:
     SearchModel();
-    virtual ~SearchModel();
 
     void SetShowTags(bool show);
     bool GetShowTags();
 	void AddObserver(SearchView * observer);
-	bool UpdateSaveList(int pageNumber, std::string query);
-	vector<SaveInfo*> GetSaveList();
-	vector<pair<string, int> > GetTagList();
-	string GetLastError() { return lastError; }
-	int GetPageCount()
-	{
-		if (!showOwn && !showFavourite && currentSort == "best" && lastQuery == "")
-			return max(1, (int)(ceil(resultCount/20.0f))+1); //add one for front page (front page saves are repeated twice)
-		else
-			return max(1, (int)(ceil(resultCount/20.0f)));
-	}
+	bool UpdateSaveList(int pageNumber, String query);
+	std::vector<SaveInfo *> GetSaveList(); // non-owning
+	std::vector<std::pair<ByteString, int> > GetTagList();
+	String GetLastError() { return lastError; }
+	int GetPageCount();
 	int GetPageNum() { return currentPage; }
-	std::string GetLastQuery() { return lastQuery; }
-	void SetSort(string sort) { if(!updateSaveListWorking) { currentSort = sort; } notifySortChanged(); }
-	string GetSort() { return currentSort; }
-	void SetShowOwn(bool show) { if(!updateSaveListWorking) { if(show!=showOwn) { showOwn = show; } } notifyShowOwnChanged();  }
+	String GetLastQuery() { return lastQuery; }
+	void SetPeriod(http::Period period) { if(!searchSaves) { currentPeriod = period; } notifyPeriodChanged(); }
+	http::Period GetPeriod() { return currentPeriod; }
+	void SetSort(http::Sort sort) { if(!searchSaves) { currentSort = sort; } notifySortChanged(); }
+	http::Sort GetSort() { return currentSort; }
+	void SetShowOwn(bool show) { if(!searchSaves) { if(show!=showOwn) { showOwn = show; } } notifyShowOwnChanged();  }
 	bool GetShowOwn() { return showOwn; }
-	void SetShowFavourite(bool show) { if(show!=showFavourite && !updateSaveListWorking) { showFavourite = show; } notifyShowFavouriteChanged();  }
+	void SetShowFavourite(bool show) { if(show!=showFavourite && !searchSaves) { showFavourite = show; } notifyShowFavouriteChanged();  }
 	bool GetShowFavourite() { return showFavourite; }
-	void SetLoadedSave(SaveInfo * save);
-	SaveInfo * GetLoadedSave();
+	void SetLoadedSave(std::unique_ptr<SaveInfo> save);
+	const SaveInfo *GetLoadedSave() const;
+	std::unique_ptr<SaveInfo> TakeLoadedSave();
 	bool GetSavesLoaded() { return saveListLoaded; }
-	vector<int> GetSelected() { return selected; }
+	std::vector<int> GetSelected() { return selected; }
 	void ClearSelected() { selected.clear(); notifySelectedChanged(); }
 	void SelectSave(int saveID);
+	void SelectAllSaves();
 	void DeselectSave(int saveID);
 	void Update();
 };
-
-#endif // SEARCHMODEL_H

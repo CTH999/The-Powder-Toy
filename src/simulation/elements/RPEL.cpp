@@ -1,14 +1,16 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_RPEL PT_RPEL 160
-Element_RPEL::Element_RPEL()
+#include "simulation/ElementCommon.h"
+
+static int update(UPDATE_FUNC_ARGS);
+
+void Element::Element_RPEL()
 {
 	Identifier = "DEFAULT_PT_RPEL";
 	Name = "RPEL";
-	Colour = PIXPACK(0x99CC00);
+	Colour = 0x99CC00_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_FORCE;
 	Enabled = 1;
-	
+
 	Advection = 0.0f;
 	AirDrag = 0.00f * CFDS;
 	AirLoss = 0.90f;
@@ -18,21 +20,20 @@ Element_RPEL::Element_RPEL()
 	Diffusion = 0.00f;
 	HotAir = 0.000f  * CFDS;
 	Falldown = 0;
-	
+
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 0;
 	Hardness = 1;
-	
+
 	Weight = 100;
-	
-	Temperature = 20.0f+0.0f  +273.15f;
+
+	DefaultProperties.temp = 20.0f + 273.15f;
 	HeatConduct = 0;
 	Description = "Repels or attracts particles based on its temperature.";
-	
-	State = ST_NONE;
+
 	Properties = TYPE_SOLID;
-	
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;
@@ -41,33 +42,33 @@ Element_RPEL::Element_RPEL()
 	LowTemperatureTransition = NT;
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
-	
-	Update = &Element_RPEL::update;
-	
+
+	Update = &update;
+	CtypeDraw = &Element::basicCtypeDraw;
 }
 
-//#TPT-Directive ElementHeader Element_RPEL static int update(UPDATE_FUNC_ARGS)
-int Element_RPEL::update(UPDATE_FUNC_ARGS)
- {
+static int update(UPDATE_FUNC_ARGS)
+{
+	auto &sd = SimulationData::CRef();
+	auto &elements = sd.elements;
 	int r, rx, ry, ri;
 	for(ri = 0; ri <= 10; ri++)
 	{
-		rx = (rand()%21)-10;
-		ry = (rand()%21)-10;
+		rx = sim->rng.between(-10, 10);
+		ry = sim->rng.between(-10, 10);
 		if (x+rx >= 0 && x+rx < XRES && y+ry >= 0 && y+ry < YRES && (rx || ry))
 		{
 			r = pmap[y+ry][x+rx];
 			if (!r)
 				r = sim->photons[y+ry][x+rx];
 
-			if (r && !(sim->elements[r&0xFF].Properties & TYPE_SOLID)){
-				parts[r>>8].vx += isign(rx)*((parts[i].temp-273.15)/10.0f);
-				parts[r>>8].vy += isign(ry)*((parts[i].temp-273.15)/10.0f);
+			if (r && !(elements[TYP(r)].Properties & TYPE_SOLID)) {
+				if (!parts[i].ctype || parts[i].ctype == parts[ID(r)].type) {
+					parts[ID(r)].vx += isign(rx)*((parts[i].temp-273.15)/10.0f);
+					parts[ID(r)].vy += isign(ry)*((parts[i].temp-273.15)/10.0f);
+				}
 			}
 		}
 	}
 	return 0;
 }
-
-
-Element_RPEL::~Element_RPEL() {}

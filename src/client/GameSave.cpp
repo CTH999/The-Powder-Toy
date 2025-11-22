@@ -1,1143 +1,1276 @@
-#include <iostream>
-#include <sstream>
-#include <cmath>
-#include <vector>
-#include <bzlib.h>
-#include "Config.h"
-#include "Format.h"
-#include "bson/BSON.h"
 #include "GameSave.h"
-#include "simulation/SimulationData.h"
-#include "ElementClasses.h"
-extern "C"
+#include "bzip2/bz2wrap.h"
+#include "Format.h"
+#include "simulation/Simulation.h"
+#include "simulation/ElementClasses.h"
+#include "simulation/elements/PIPE.h"
+#include "common/tpt-compat.h"
+#include "common/Bson.h"
+#include "graphics/Renderer.h"
+#include "Config.h"
+#include <iostream>
+#include <cmath>
+#include <climits>
+#include <memory>
+#include <set>
+#include <cmath>
+#include <algorithm>
+#include <stack>
+
+constexpr auto currentVersion = UPSTREAM_VERSION.displayVersion;
+constexpr auto nextVersion = Version(100, 0);
+static_assert(!ALLOW_FAKE_NEWER_VERSION || nextVersion >= currentVersion);
+
+constexpr auto effectiveVersion = ALLOW_FAKE_NEWER_VERSION ? nextVersion : currentVersion;
+
+static void TrimAuthorsIn(Bson &b, int depth);
+static std::set<int> GetNestedSaveIDs(const Bson &j);
+static void TrimAuthorsOut(Bson &b, int depth);
+
+GameSave::GameSave(Vec2<int> newBlockSize)
 {
-	#include "hmap.h"
+	setSize(newBlockSize);
 }
 
-GameSave::GameSave(GameSave & save) :
-waterEEnabled(save.waterEEnabled),
-legacyEnable(save.legacyEnable),
-gravityEnable(save.gravityEnable),
-aheatEnable(save.aheatEnable),
-paused(save.paused),
-gravityMode(save.gravityMode),
-airMode(save.airMode),
-edgeMode(save.edgeMode),
-signs(save.signs),
-palette(save.palette),
-expanded(save.expanded),
-hasOriginalData(save.hasOriginalData),
-originalData(save.originalData)
+GameSave::GameSave(const std::vector<char> &data, bool newWantAuthors)
 {
-	blockMap = NULL;
-	blockMapPtr = NULL;
-	fanVelX = NULL;
-	fanVelXPtr = NULL;
-	fanVelY = NULL;
-	fanVelYPtr = NULL;
-	particles = NULL;
-	if(save.expanded)
-	{
-		setSize(save.blockWidth, save.blockHeight);
+	wantAuthors = newWantAuthors;
 
-		std::copy(save.particles, save.particles+NPART, particles);
-		std::copy(save.blockMapPtr, save.blockMapPtr+(blockHeight*blockWidth), blockMapPtr);
-		std::copy(save.fanVelXPtr, save.fanVelXPtr+(blockHeight*blockWidth), fanVelXPtr);
-		std::copy(save.fanVelYPtr, save.fanVelYPtr+(blockHeight*blockWidth), fanVelYPtr);
-	}
-	else
-	{
-		blockWidth = save.blockWidth;
-		blockHeight = save.blockHeight;
-	}
-	particlesCount = save.particlesCount;
-	fromNewerVersion = false;
-}
-
-GameSave::GameSave(int width, int height)
-{
-	blockMap = NULL;
-	blockMapPtr = NULL;
-	fanVelX = NULL;
-	fanVelXPtr = NULL;
-	fanVelY = NULL;
-	fanVelYPtr = NULL;
-	particles = NULL;
-
-	fromNewerVersion = false;
-	hasOriginalData = false;
-	expanded = true;
-	setSize(width, height);
-}
-
-GameSave::GameSave(std::vector<char> data)
-{
-	blockWidth = 0;
-	blockHeight = 0;
-
-	blockMap = NULL;
-	blockMapPtr = NULL;
-	fanVelX = NULL;
-	fanVelXPtr = NULL;
-	fanVelY = NULL;
-	fanVelYPtr = NULL;
-	particles = NULL;
-
-	fromNewerVersion = false;
-	expanded = false;
-	hasOriginalData = true;
-	originalData = data;
-#ifdef DEBUG
-	std::cout << "Creating Collapsed save from data" << std::endl;
-#endif
 	try
 	{
-		Expand();
+		Expand(data);
 	}
 	catch(ParseException & e)
 	{
 		std::cout << e.what() << std::endl;
-		dealloc();	//Free any allocated memory
 		throw;
 	}
-	Collapse();
 }
 
-GameSave::GameSave(std::vector<unsigned char> data)
+void GameSave::MapPalette()
 {
-	blockWidth = 0;
-	blockHeight = 0;
+	// - the palette is always right
+	//   - there are palettes with missing entries but there are no palettes with incorrect entries
+	//   - for every (identifier, number) pair in the palette
+	//     - if the identifier is recognized, map the number to the appropriate element
+	//     - if not, map it to 0
+	//       - complain about the identifier if the corresponding number is actually used
+	// - to handle every number not covered by the palette
+	//   - in the case of any 98.0+ save, the palette is comprehensive
+	//     - except for the few cases already handled below
+	//       - e.g RSSS et al not having CarriesTypeIn set properly until 98.2
+	//       - can handle mistakes like this with similar extra code later
+	//     - map any number seen used to 0 and complain about the number
+	//   - in the case of any pre-98.0 save, the palette may not be comprehensive
+	//     - in the case of saves from 78.1 and newer
+	//       - identity-map only ranges of numbers that are known to have existed
+	//         at the point in time in vanilla when the save was made, based on this->version
+	//       - this is still not perfect because it lets numbers slip that a mod freed up a
+	//         vanilla element from and reused for one of its own elements, but that's fine
+	//     - in the case of saves older than that
+	//       - pretend that they are 78.1 in terms of validity of element numbers, this is good enough
 
-	blockMap = NULL;
-	blockMapPtr = NULL;
-	fanVelX = NULL;
-	fanVelXPtr = NULL;
-	fanVelY = NULL;
-	fanVelYPtr = NULL;
-	particles = NULL;
+	std::vector<int> partMap(PT_NUM, 0);
+	std::vector<bool> ignoreMissingErrors(PT_NUM, false);
+	if (version <= Version(98, 2))
+	{
+		ignoreMissingErrors[PT_ICEI] = true;
+		ignoreMissingErrors[PT_SNOW] = true;
+		ignoreMissingErrors[PT_RSST] = true;
+		ignoreMissingErrors[PT_RSSS] = true;
+	}
 
-	fromNewerVersion = false;
-	expanded = false;
-	hasOriginalData = true;
-	originalData = std::vector<char>(data.begin(), data.end());
-#ifdef DEBUG
-	std::cout << "Creating Collapsed save from data" << std::endl;
-#endif
+	auto &sd = SimulationData::CRef();
+	auto &elements = sd.elements;
+	std::map<ByteString, int> missingElementIdentifiers;
+	if (version < Version(98, 0))
+	{
+		struct CoarsePaletteInfo
+		{
+			Version<2> firstVersion; // the first version to which this entry applies
+			int maxValid;            // almost all element numbers in the range [1, maxValid] are valid, but see golHoleFirst
+			int golHoleFirst;        // the element numbers in the range [golHoleFirst, golHoleLast] are not valid
+			int golHoleLast;
+		};
+		static const std::vector<CoarsePaletteInfo> cpi = {
+			// must be sorted by firstVersion
+			{ Version(78, 1), 160, 144, 146 }, // 147 isn't allocated in this version but other elements
+			                                   // in certain states are loaded as 147, so leave it alone
+			{ Version(79, 0), 160, 145, 146 }, // similarly
+			{ Version(80, 0), 160, 146, 146 }, // similarly
+			{ Version(80, 5), 160, 146, 146 },
+			{ Version(81, 7), 161, 146, 146 },
+			{ Version(83, 0), 162, 146, 146 },
+			{ Version(83, 4), 163, 146, 146 },
+			{ Version(84, 0), 166, 146, 146 },
+			{ Version(86, 0), 169, 146, 146 },
+			{ Version(87, 1), 172, 146, 146 },
+			{ Version(89, 0), 176, 146, 146 },
+			{ Version(90, 0), 178, 146, 146 },
+			{ Version(91, 0), 179, 146, 146 },
+			{ Version(92, 0), 185, 146, 146 },
+			{ Version(94, 0), 186, 146, 146 },
+			{ Version(96, 0), 191, 146, 146 },
+		};
+		auto found = cpi[0]; // pretend everything is at least from the first version in the list
+		for (auto &info : std::span(cpi.begin() + 1, cpi.end()))
+		{
+			if (info.firstVersion <= version)
+			{
+				found = info;
+			}
+		}
+		for (int i = 1; i <= found.maxValid; i++)
+		{
+			if (i >= found.golHoleFirst && i <= found.golHoleLast)
+			{
+				continue;
+			}
+			partMap[i] = i;
+		}
+	}
+	for (auto &pi : palette)
+	{
+		if (pi.second > 0 && pi.second < PT_NUM)
+		{
+			int myId = 0;
+			for (int i = 0; i < PT_NUM; i++)
+			{
+				if (elements[i].Enabled && elements[i].Identifier == pi.first)
+				{
+					myId = i;
+				}
+			}
+			partMap[pi.second] = myId;
+			if (!myId)
+			{
+				missingElementIdentifiers.insert(pi);
+			}
+		}
+	}
+	auto paletteLookup = [this, &partMap](int type, bool ignoreMissingErrors) {
+		if (type > 0 && type < PT_NUM)
+		{
+			auto carriedType = partMap[type];
+			if (!carriedType) // type is not 0 so this shouldn't be 0 either
+			{
+				if (ignoreMissingErrors)
+					return type;
+				missingElements.ids.insert(type);
+			}
+			type = carriedType;
+		}
+		return type;
+	};
+
+	unsigned int pmapmask = (1<<pmapbits)-1;
+	auto &possiblyCarriesType = Particle::PossiblyCarriesType();
+	auto &properties = Particle::GetProperties();
+	for (int n = 0; n < NPART && n < particlesCount; n++)
+	{
+		Particle &tempPart = particles[n];
+		if (tempPart.type <= 0 || tempPart.type >= PT_NUM)
+		{
+			continue;
+		}
+		tempPart.type = paletteLookup(tempPart.type, false);
+		for (auto index : possiblyCarriesType)
+		{
+			if (elements[tempPart.type].CarriesTypeIn & (1U << index))
+			{
+				auto *prop = reinterpret_cast<int *>(reinterpret_cast<char *>(&tempPart) + properties[index].Offset);
+				auto carriedType = *prop & int(pmapmask);
+				auto extra = *prop >> pmapbits;
+				carriedType = paletteLookup(carriedType, ignoreMissingErrors[tempPart.type]);
+				*prop = PMAP(extra, carriedType);
+			}
+		}
+	}
+	for (const auto &pi : missingElementIdentifiers)
+	{
+		if (missingElements.ids.find(pi.second) != missingElements.ids.end())
+		{
+			missingElements.identifiers.insert(pi);
+		}
+	}
+}
+
+void GameSave::Expand(const std::vector<char> &data)
+{
 	try
 	{
-		Expand();
-	}
-	catch(ParseException & e)
-	{
-		std::cout << e.what() << std::endl;
-		dealloc();	//Free any allocated memory
-		throw;
-	}
-	Collapse();
-}
-
-GameSave::GameSave(char * data, int dataSize)
-{
-	blockWidth = 0;
-	blockHeight = 0;
-
-	blockMap = NULL;
-	blockMapPtr = NULL;
-	fanVelX = NULL;
-	fanVelXPtr = NULL;
-	fanVelY = NULL;
-	fanVelYPtr = NULL;
-	particles = NULL;
-
-	fromNewerVersion = false;
-	expanded = false;
-	hasOriginalData = true;
-	originalData = std::vector<char>(data, data+dataSize);
-#ifdef DEBUG
-	std::cout << "Creating Expanded save from data" << std::endl;
-#endif
-	try
-	{
-		Expand();
-	}
-	catch(ParseException & e)
-	{
-		std::cout << e.what() << std::endl;
-		dealloc();	//Free any allocated memory
-		throw;
-	}
-	//Collapse();
-}
-
-bool GameSave::Collapsed()
-{
-	return !expanded;
-}
-
-void GameSave::Expand()
-{
-	if(hasOriginalData && !expanded)
-	{
-		waterEEnabled = false;
-		legacyEnable = false;
-		gravityEnable = false;
-		aheatEnable = false;
-		paused = false;
-		gravityMode = 0;
-		airMode = 0;
-		edgeMode = 0;
-		expanded = true;
-		read(&originalData[0], originalData.size());
-	}
-}
-
-void GameSave::Collapse()
-{
-	if(expanded && hasOriginalData)
-	{
-		expanded = false;
-		if(particles)
-		{
-			delete[] particles;
-			particles = NULL;
-		}
-		if(blockMap)
-		{
-			delete[] blockMap;
-			blockMap = NULL;
-		}
-		if(blockMapPtr)
-		{
-			delete[] blockMapPtr;
-			blockMapPtr = NULL;
-		}
-		if(fanVelX)
-		{
-			delete[] fanVelX;
-			fanVelX = NULL;
-		}
-		if(fanVelXPtr)
-		{
-			delete[] fanVelXPtr;
-			fanVelXPtr = NULL;
-		}
-		if(fanVelY)
-		{
-			delete[] fanVelY;
-			fanVelY = NULL;
-		}
-		if(fanVelYPtr)
-		{
-			delete[] fanVelYPtr;
-			fanVelYPtr = NULL;
-		}
-		signs.clear();
-	}
-}
-
-void GameSave::read(char * data, int dataSize)
-{
-	if(dataSize > 15)
+	if(data.size() > 15)
 	{
 		if ((data[0]==0x66 && data[1]==0x75 && data[2]==0x43) || (data[0]==0x50 && data[1]==0x53 && data[2]==0x76))
 		{
-#ifdef DEBUG
-			std::cout << "Reading PSv..." << std::endl;
-#endif
-			readPSv(data, dataSize);
+			readPSv(data);
 		}
 		else if(data[0] == 'O' && data[1] == 'P' && data[2] == 'S')
 		{
-#ifdef DEBUG
-			std::cout << "Reading OPS..." << std::endl;
-#endif
 			if (data[3] != '1')
 				throw ParseException(ParseException::WrongVersion, "Save format from newer version");
-			readOPS(data, dataSize);
+			readOPS(data);
 		}
 		else
 		{
 			std::cerr << "Got Magic number '" << data[0] << data[1] << data[2] << "'" << std::endl;
 			throw ParseException(ParseException::Corrupt, "Invalid save format");
 		}
+		MapPalette();
 	}
 	else
 	{
 		throw ParseException(ParseException::Corrupt, "No data");
 	}
+	}
+	catch (const std::bad_alloc &)
+	{
+		throw ParseException(ParseException::Corrupt, "Cannot allocate memory");
+	}
 }
 
-void GameSave::setSize(int newWidth, int newHeight)
+void GameSave::setSize(Vec2<int> newBlockSize)
 {
-	this->blockWidth = newWidth;
-	this->blockHeight = newHeight;
+	blockSize = newBlockSize;
 
 	particlesCount = 0;
-	particles = new Particle[NPART];
+	particles = std::vector<Particle>(NPART);
 
-	blockMapPtr = new unsigned char[blockHeight*blockWidth];
-	std::fill(blockMapPtr, blockMapPtr+(blockHeight*blockWidth), 0);
-	fanVelXPtr = new float[(blockHeight)*(blockWidth)];
-	std::fill(fanVelXPtr, fanVelXPtr+((blockHeight)*(blockWidth)), 0.0f);
-	fanVelYPtr = new float[(blockHeight)*(blockWidth)];
-	std::fill(fanVelYPtr, fanVelYPtr+((blockHeight)*(blockWidth)), 0.0f);
-
-	blockMap = new unsigned char*[blockHeight];
-	for(int y = 0; y < blockHeight; y++)
-		blockMap[y] = &blockMapPtr[y*blockWidth];
-	fanVelX = new float*[blockHeight];
-	for(int y = 0; y < blockHeight; y++)
-		fanVelX[y] = &fanVelXPtr[y*(blockWidth)];
-	fanVelY = new float*[blockHeight];
-	for(int y = 0; y < blockHeight; y++)
-		fanVelY[y] = &fanVelYPtr[y*blockWidth];
+	blockMap = PlaneAdapter<std::vector<unsigned char>>(blockSize, 0);
+	fanVelX = PlaneAdapter<std::vector<float>>(blockSize, 0.0f);
+	fanVelY = PlaneAdapter<std::vector<float>>(blockSize, 0.0f);
+	pressure = PlaneAdapter<std::vector<float>>(blockSize, 0.0f);
+	velocityX = PlaneAdapter<std::vector<float>>(blockSize, 0.0f);
+	velocityY = PlaneAdapter<std::vector<float>>(blockSize, 0.0f);
+	ambientHeat = PlaneAdapter<std::vector<float>>(blockSize, 0.0f);
+	blockAir = PlaneAdapter<std::vector<unsigned char>>(blockSize, 0);
+	blockAirh = PlaneAdapter<std::vector<unsigned char>>(blockSize, 0);
+	gravMass = PlaneAdapter<std::vector<float>>(blockSize, 0.f);
+	gravMask = PlaneAdapter<std::vector<uint32_t>>(blockSize, UINT32_C(0xFFFFFFFF));
+	gravForceX = PlaneAdapter<std::vector<float>>(blockSize, 0.f);
+	gravForceY = PlaneAdapter<std::vector<float>>(blockSize, 0.f);
 }
 
-std::vector<char> GameSave::Serialise()
+std::pair<bool, std::vector<char>> GameSave::Serialise() const
 {
-	unsigned int dataSize;
-	char * data = Serialise(dataSize);
-	std::vector<char> dataVect(data, data+dataSize);
-	delete[] data;
-	return dataVect;
-}
-
-char * GameSave::Serialise(unsigned int & dataSize)
-{
-	return serialiseOPS(dataSize);
-}
-
-void GameSave::Transform(matrix2d transform, vector2d translate)
-{
-	if(Collapsed())
-		Expand();
-	int x, y, nx, ny, width = blockWidth*CELL, height = blockHeight*CELL, newWidth, newHeight, newBlockWidth, newBlockHeight;
-	vector2d pos, tmp, ctl, cbr, vel;
-	vector2d cornerso[4];
-	// undo any translation caused by rotation
-	cornerso[0] = v2d_new(0,0);
-	cornerso[1] = v2d_new(width-1,0);
-	cornerso[2] = v2d_new(0,height-1);
-	cornerso[3] = v2d_new(width-1,height-1);
-	for (int i = 0; i < 4; i++)
+	try
 	{
-		tmp = m2d_multiply_v2d(transform,cornerso[i]);
-		if (i==0) ctl = cbr = tmp; // top left, bottom right corner
-		if (tmp.x<ctl.x) ctl.x = tmp.x;
-		if (tmp.y<ctl.y) ctl.y = tmp.y;
-		if (tmp.x>cbr.x) cbr.x = tmp.x;
-		if (tmp.y>cbr.y) cbr.y = tmp.y;
+		return serialiseOPS();
 	}
-	// casting as int doesn't quite do what we want with negative numbers, so use floor()
-	tmp = v2d_new(floor(ctl.x+0.5f),floor(ctl.y+0.5f));
-	translate = v2d_sub(translate,tmp);
-	newWidth = floor(cbr.x+0.5f)-floor(ctl.x+0.5f)+1;
-	newHeight = floor(cbr.y+0.5f)-floor(ctl.y+0.5f)+1;
-	if (newWidth>XRES) newWidth = XRES;
-	if (newHeight>YRES) newHeight = YRES;
-	newBlockWidth = newWidth/CELL;
-	newBlockHeight = newHeight/CELL;
-
-	unsigned char ** blockMapNew;
-	float ** fanVelXNew;
-	float ** fanVelYNew;
-
-	float * fanVelXPtrNew;
-	float * fanVelYPtrNew;
-	unsigned char * blockMapPtrNew;
-
-	blockMapPtrNew = new unsigned char[newBlockHeight*newBlockWidth];
-	std::fill(blockMapPtrNew, blockMapPtrNew+(newBlockHeight*newBlockWidth), 0);
-	fanVelXPtrNew = new float[newBlockHeight*newBlockWidth];
-	std::fill(fanVelXPtrNew, fanVelXPtrNew+(newBlockHeight*newBlockWidth), 0.0f);
-	fanVelYPtrNew = new float[(newBlockHeight)*(newBlockWidth)];
-	std::fill(fanVelYPtrNew, fanVelYPtrNew+(newBlockHeight*newBlockWidth), 0.0f);
-
-	blockMapNew = new unsigned char*[newBlockHeight];
-	for(int y = 0; y < newBlockHeight; y++)
-		blockMapNew[y] = &blockMapPtrNew[y*newBlockWidth];
-	fanVelXNew = new float*[newBlockHeight];
-	for(int y = 0; y < newBlockHeight; y++)
-		fanVelXNew[y] = &fanVelXPtrNew[y*newBlockWidth];
-	fanVelYNew = new float*[newBlockHeight];
-	for(int y = 0; y < newBlockHeight; y++)
-		fanVelYNew[y] = &fanVelYPtrNew[y*newBlockWidth];
-
-	// rotate and translate signs, parts, walls
-	for (size_t i = 0; i < signs.size(); i++)
+	catch (const std::bad_alloc &)
 	{
-		pos = v2d_new(signs[i].x, signs[i].y);
-		pos = v2d_add(m2d_multiply_v2d(transform,pos),translate);
-		nx = floor(pos.x+0.5f);
-		ny = floor(pos.y+0.5f);
-		if (nx<0 || nx>=newWidth || ny<0 || ny>=newHeight)
+		std::cout << "Save error, out of memory" << std::endl;
+	}
+	catch (BuildException & e)
+	{
+		std::cout << e.what() << std::endl;
+	}
+	return { false, {} };
+}
+
+void GameSave::Transform(Mat2<int> transform, Vec2<int> nudge)
+{
+	// undo translation by rotation
+	auto br  = transform * (blockSize * CELL - Vec2{ 1, 1 });
+	auto bbr = transform * (blockSize        - Vec2{ 1, 1 });
+	auto translate  = Vec2{ std::max(0,  -br.X), std::max(0,  -br.Y) };
+	auto btranslate = Vec2{ std::max(0, -bbr.X), std::max(0, -bbr.Y) };
+	auto newBlockS = transform * blockSize;
+	newBlockS.X = std::abs(newBlockS.X);
+	newBlockS.Y = std::abs(newBlockS.Y);
+	translate += nudge;
+
+	// Grow as needed.
+	assert((Vec2{ CELL, CELL }.OriginRect().Contains(nudge)));
+	if (nudge.X) newBlockS.X += 1;
+	if (nudge.Y) newBlockS.Y += 1;
+
+	// TODO: allow transforms to yield bigger saves. For this we'd need SaveRenderer (the singleton, not Renderer)
+	// to fully render them (possible with stitching) and Simulation::Load to be able to take only the part that fits.
+	newBlockS = newBlockS.Clamp(RectBetween({ 0, 0 }, CELLS));
+	auto newPartS = newBlockS * CELL;
+
+	// Prepare to patch pipes.
+	std::array<int, 8> pipeOffsetMap;
+	{
+		std::transform(Element_PIPE_offsets.begin(), Element_PIPE_offsets.end(), pipeOffsetMap.begin(), [transform](auto offset) {
+			auto it = std::find(Element_PIPE_offsets.begin(), Element_PIPE_offsets.end(), transform * offset);
+			assert(it != Element_PIPE_offsets.end());
+			return int(it - Element_PIPE_offsets.begin());
+		});
+	}
+
+	// Translate signs.
+	for (auto i = 0U; i < signs.size(); i++)
+	{
+		auto newPos = transform * Vec2{ signs[i].x, signs[i].y } + translate;
+		if (!newPartS.OriginRect().Contains(newPos))
 		{
-			signs[i].text[0] = 0;
+			signs[i].text.clear();
 			continue;
 		}
-		signs[i].x = nx;
-		signs[i].y = ny;
+		signs[i].x = newPos.X;
+		signs[i].y = newPos.Y;
 	}
+
+	// Translate particles.
 	for (int i = 0; i < particlesCount; i++)
 	{
-		if (!particles[i].type) continue;
-		pos = v2d_new(particles[i].x, particles[i].y);
-		pos = v2d_add(m2d_multiply_v2d(transform,pos),translate);
-		nx = floor(pos.x+0.5f);
-		ny = floor(pos.y+0.5f);
-		if (nx<0 || nx>=newWidth || ny<0 || ny>=newHeight)
+		if (!particles[i].type)
+		{
+			continue;
+		}
+		{
+			// * We want particles to retain their distance from the centre of the particle grid cell
+			//   they are in, but more importantly we also don't want them to change grid cells,
+			//   so we just get rid of the edge cases.
+			constexpr auto threshold = 0.001f;
+			auto boundaryDiffX = particles[i].x - (floor(particles[i].x) + 0.5f);
+			if (fabs(boundaryDiffX) < threshold)
+			{
+				particles[i].x += copysign(threshold, boundaryDiffX);
+			}
+			auto boundaryDiffY = particles[i].y - (floor(particles[i].y) + 0.5f);
+			if (fabs(boundaryDiffY) < threshold)
+			{
+				particles[i].y += copysign(threshold, boundaryDiffY);
+			}
+		}
+		if (particles[i].x - floor(particles[i].x) == 0.5f) particles[i].x += 0.001f;
+		if (particles[i].y - floor(particles[i].y) == 0.5f) particles[i].y += 0.001f;
+		auto newPos = transform * Vec2{ particles[i].x, particles[i].y } + translate;
+		if (!newPartS.OriginRect().Contains(Vec2{ int(floor(newPos.X + 0.5f)), int(floor(newPos.Y + 0.5f)) }))
 		{
 			particles[i].type = PT_NONE;
 			continue;
 		}
-		particles[i].x = nx;
-		particles[i].y = ny;
-		vel = v2d_new(particles[i].vx, particles[i].vy);
-		vel = m2d_multiply_v2d(transform, vel);
-		particles[i].vx = vel.x;
-		particles[i].vy = vel.y;
-	}
-	for (y=0; y<blockHeight; y++)
-		for (x=0; x<blockWidth; x++)
+		particles[i].x = newPos.X;
+		particles[i].y = newPos.Y;
+		auto newVel = transform * Vec2{ particles[i].vx, particles[i].vy };
+		particles[i].vx = newVel.X;
+		particles[i].vy = newVel.Y;
+		if (particles[i].type == PT_PIPE || particles[i].type == PT_PPIP)
 		{
-			pos = v2d_new(x*CELL+CELL*0.4f, y*CELL+CELL*0.4f);
-			pos = v2d_add(m2d_multiply_v2d(transform,pos),translate);
-			nx = pos.x/CELL;
-			ny = pos.y/CELL;
-			if (nx<0 || nx>=newBlockWidth || ny<0 || ny>=newBlockHeight)
-				continue;
-			if (blockMap[y][x])
+			Element_PIPE_transformPatchOffsets(particles[i], pipeOffsetMap);
+		}
+	}
+
+	// Translate blocky stuff.
+	PlaneAdapter<std::vector<unsigned char>> newBlockMap(newBlockS, 0);
+	PlaneAdapter<std::vector<float>> newFanVelX(newBlockS, 0.0f);
+	PlaneAdapter<std::vector<float>> newFanVelY(newBlockS, 0.0f);
+	PlaneAdapter<std::vector<float>> newPressure(newBlockS, 0.0f);
+	PlaneAdapter<std::vector<float>> newVelocityX(newBlockS, 0.0f);
+	PlaneAdapter<std::vector<float>> newVelocityY(newBlockS, 0.0f);
+	PlaneAdapter<std::vector<float>> newAmbientHeat(newBlockS, 0.0f);
+	PlaneAdapter<std::vector<unsigned char>> newBlockAir(newBlockS, 0);
+	PlaneAdapter<std::vector<unsigned char>> newBlockAirh(newBlockS, 0);
+	PlaneAdapter<std::vector<float>> newGravMass(newBlockS, 0.f);
+	PlaneAdapter<std::vector<uint32_t>> newGravMask(newBlockS, UINT32_C(0xFFFFFFFF));
+	PlaneAdapter<std::vector<float>> newGravForceX(newBlockS, 0.f);
+	PlaneAdapter<std::vector<float>> newGravForceY(newBlockS, 0.f);
+	for (auto bpos : blockSize.OriginRect())
+	{
+		auto newBpos = transform * bpos + btranslate;
+		if (!newBlockS.OriginRect().Contains(newBpos))
+		{
+			continue;
+		}
+		if (blockMap[bpos])
+		{
+			newBlockMap[newBpos] = blockMap[bpos];
+			if (blockMap[bpos] == WL_FAN)
 			{
-				blockMapNew[ny][nx] = blockMap[y][x];
-				if (blockMap[y][x]==WL_FAN)
-				{
-					vel = v2d_new(fanVelX[y][x], fanVelY[y][x]);
-					vel = m2d_multiply_v2d(transform, vel);
-					fanVelXNew[ny][nx] = vel.x;
-					fanVelYNew[ny][nx] = vel.y;
-				}
+				auto newVel = transform * Vec2{ fanVelX[bpos], fanVelY[bpos] };
+				newFanVelX[newBpos] = newVel.X;
+				newFanVelY[newBpos] = newVel.Y;
 			}
 		}
-	//ndata = build_save(size,0,0,nw,nh,blockMapNew,vxn,vyn,pvn,fanVelXNew,fanVelYNew,signst,partst);
-	blockWidth = newBlockWidth;
-	blockHeight = newBlockHeight;
+		newPressure[newBpos] = pressure[bpos];
+		newVelocityX[newBpos] = velocityX[bpos];
+		newVelocityY[newBpos] = velocityY[bpos];
+		newAmbientHeat[newBpos] = ambientHeat[bpos];
+		newBlockAir[newBpos] = blockAir[bpos];
+		newBlockAirh[newBpos] = blockAirh[bpos];
+		newGravMass[newBpos] = gravMass[bpos];
+		newGravMask[newBpos] = gravMask[bpos];
+		newGravForceX[newBpos] = gravForceX[bpos];
+		newGravForceY[newBpos] = gravForceY[bpos];
+	}
+	blockMap = std::move(newBlockMap);
+	fanVelX = std::move(newFanVelX);
+	fanVelY = std::move(newFanVelY);
+	pressure = std::move(newPressure);
+	velocityX = std::move(newVelocityX);
+	velocityY = std::move(newVelocityY);
+	ambientHeat = std::move(newAmbientHeat);
+	blockAir = std::move(newBlockAir);
+	blockAirh = std::move(newBlockAirh);
+	gravMass = std::move(newGravMass);
+	gravMask = std::move(newGravMask);
+	gravForceX = std::move(newGravForceX);
+	gravForceY = std::move(newGravForceY);
 
-	delete[] blockMap;
-	delete[] fanVelX;
-	delete[] fanVelY;
-
-	delete[] blockMapPtr;
-	delete[] fanVelXPtr;
-	delete[] fanVelYPtr;
-
-	blockMap = blockMapNew;
-	fanVelX = fanVelXNew;
-	fanVelY = fanVelYNew;
-
-	blockMapPtr = (unsigned char*)blockMapPtrNew;
-	fanVelXPtr = (float*)fanVelXPtrNew;
-	fanVelYPtr = (float*)fanVelYPtrNew;
+	blockSize = newBlockS;
 }
 
-void GameSave::readOPS(char * data, int dataLength)
+static Bson MakeOpsNonconformance()
 {
-	unsigned char * inputData = (unsigned char*)data, *bsonData = NULL, *partsData = NULL, *partsPosData = NULL, *fanData = NULL, *wallData = NULL, *soapLinkData = NULL;
-	unsigned int inputDataLen = dataLength, bsonDataLen = 0, partsDataLen, partsPosDataLen, fanDataLen, wallDataLen, soapLinkDataLen;
-	unsigned partsCount = 0, *partsSimIndex = NULL;
-	int *freeIndices = NULL;
-	unsigned int blockX, blockY, blockW, blockH, fullX, fullY, fullW, fullH;
-	int savedVersion = inputData[4];
-	bson b;
-	bson_iterator iter;
+	Bson opsNonconformance(Bson::Type::objectValue);
+	{
+		auto &paletteNode = (opsNonconformance["palette"] = Bson::Type::arrayValue);
+		paletteNode.Append("objectEncodedAsArray");
+	}
+	{
+		auto &stkmNode = (opsNonconformance["stkm"] = Bson::Type::objectValue);
+		{
+			auto &rocketBootsFighNode = (stkmNode["rocketBootsFigh"] = Bson::Type::arrayValue);
+			rocketBootsFighNode.Append("arrayEncodedWithBadKeys");
+			rocketBootsFighNode.Append("num");
+		}
+		{
+			auto &fanFighNode = (stkmNode["fanFigh"] = Bson::Type::arrayValue);
+			fanFighNode.Append("arrayEncodedWithBadKeys");
+			fanFighNode.Append("num");
+		}
+	}
+	{
+		auto &signsNode = (opsNonconformance["signs"] = Bson::Type::arrayValue);
+		signsNode.Append("arrayEncodedWithBadKeys");
+		signsNode.Append("sign");
+	}
+	return opsNonconformance;
+}
+static const Bson opsNonconformance = MakeOpsNonconformance();
+
+void GameSave::readOPS(const std::vector<char> &data)
+{
+	auto &builtinGol = SimulationData::builtinGol;
+
+	Renderer::PopulateTables();
+
+	std::span inputData(reinterpret_cast<const unsigned char *>(data.data()), data.size());
+	std::span<const unsigned char> partsData;
+	std::span<const unsigned char> partsPosData;
+	std::span<const unsigned char> fanData;
+	std::span<const unsigned char> wallData;
+	std::span<const unsigned char> soapLinkData;
+	std::span<const unsigned char> pressData;
+	std::span<const unsigned char> vxData;
+	std::span<const unsigned char> vyData;
+	std::span<const unsigned char> ambientData;
+	std::span<const unsigned char> blockAirData;
+	std::span<const unsigned char> gravityData;
+	unsigned partsCount = 0;
+	unsigned int savedVersion = inputData[4];
+	version = { savedVersion, 0 };
+	bool fakeNewerVersion = false; // used for development builds only
+
+	auto getIfType = [](const Bson &b, const char *key, Bson::Type type) -> const Bson * {
+		if (auto *node = b.Get(key))
+		{
+			if (node->GetType() != type)
+			{
+				std::cerr << "Wrong type for " << key << std::endl;
+				return nullptr;
+			}
+			return node;
+		}
+		return nullptr;
+	};
+	auto copyIfUser = [&getIfType](const Bson &b, const char *key, auto &into) {
+		if (auto *node = getIfType(b, key, Bson::Type::userValue))
+		{
+			auto &user = node->As<Bson::User>();
+			if (user.size() != sizeof(into))
+			{
+				std::cerr << "Wrong size for " << key << std::endl;
+				return false;
+			}
+			memcpy(&into, user.data(), sizeof(into));
+			return true;
+		}
+		return false;
+	};
+	auto getAddressIfUser = [&](const Bson &b, const char *key, std::span<const unsigned char> &data) {
+		if (auto *node = getIfType(b, key, Bson::Type::userValue))
+		{
+			data = node->As<Bson::User>();
+			return true;
+		}
+		return false;
+	};
+	auto copyIfBool = [&](const Bson &b, const char *key, bool &flag) {
+		if (auto *node = getIfType(b, key, Bson::Type::boolValue))
+		{
+			flag = node->As<bool>();
+			return true;
+		}
+		return false;
+	};
+	auto copyIfInt32 = [&](const Bson &b, const char *key, int &setting) {
+		if (auto *node = getIfType(b, key, Bson::Type::int32Value))
+		{
+			setting = node->As<int32_t>();
+			return true;
+		}
+		return false;
+	};
+	auto copyIfInt64 = [&](const Bson &b, const char *key, int64_t &setting) {
+		if (auto *node = getIfType(b, key, Bson::Type::int64Value))
+		{
+			setting = node->As<int64_t>();
+			return true;
+		}
+		return false;
+	};
+	auto copyIfFloat = [&](const Bson &b, const char *key, float &setting) {
+		if (auto *node = getIfType(b, key, Bson::Type::doubleValue))
+		{
+			setting = float(node->As<double>());
+			return true;
+		}
+		return false;
+	};
+
+	Bson b;
 
 	//Block sizes
-	blockX = 0;
-	blockY = 0;
-	blockW = inputData[6];
-	blockH = inputData[7];
+	auto blockP = Vec2{ 0, 0 };
+	auto blockS = Vec2{ int(inputData[6]), int(inputData[7]) };
 
 	//Full size, normalised
-	fullX = blockX*CELL;
-	fullY = blockY*CELL;
-	fullW = blockW*CELL;
-	fullH = blockH*CELL;
-
-	//From newer version
-	if (savedVersion > SAVE_VERSION)
-	{
-		fromNewerVersion = true;
-		//throw ParseException(ParseException::WrongVersion, "Save from newer version");
-	}
+	auto partP = blockP * CELL;
+	auto partS = blockS * CELL;
 
 	//Incompatible cell size
-	if (inputData[5] > CELL)
+	if (inputData[5] != CELL)
 		throw ParseException(ParseException::InvalidDimensions, "Incorrect CELL size");
 
+	if (!RectBetween({ 0, 0 }, CELLS).Contains(blockS))
+		throw ParseException(ParseException::InvalidDimensions, "Save is of invalid size");
+
 	//Too large/off screen
-	if (blockX+blockW > XRES/CELL || blockY+blockH > YRES/CELL)
-		throw ParseException(ParseException::InvalidDimensions, "Save too large");
+	if (!RectBetween({ 0, 0 }, CELLS).Contains(blockP + blockS))
+		throw ParseException(ParseException::InvalidDimensions, "Save extends beyond canvas");
 
-	setSize(blockW, blockH);
+	setSize(blockS);
 
-	bsonDataLen = ((unsigned)inputData[8]);
-	bsonDataLen |= ((unsigned)inputData[9]) << 8;
-	bsonDataLen |= ((unsigned)inputData[10]) << 16;
-	bsonDataLen |= ((unsigned)inputData[11]) << 24;
-	
+	unsigned int toAlloc = 0;
+	toAlloc = ((unsigned)inputData[8]);
+	toAlloc |= ((unsigned)inputData[9]) << 8;
+	toAlloc |= ((unsigned)inputData[10]) << 16;
+	toAlloc |= ((unsigned)inputData[11]) << 24;
+
 	//Check for overflows, don't load saves larger than 200MB
-	unsigned int toAlloc = bsonDataLen+1;
 	if (toAlloc > 209715200 || !toAlloc)
 		throw ParseException(ParseException::InvalidDimensions, "Save data too large, refusing");
-		
-	bsonData = (unsigned char*)malloc(toAlloc);
-	if (!bsonData)
-		throw ParseException(ParseException::InternalError, "Unable to allocate memory");
 
-	//Make sure bsonData is null terminated, since all string functions need null terminated strings
-	//(bson_iterator_key returns a pointer into bsonData, which is then used with strcmp)
-	bsonData[bsonDataLen] = 0;
+	{
+		std::vector<char> bsonData;
+		switch (auto status = BZ2WDecompress(bsonData, std::span(reinterpret_cast<const char *>(inputData.data() + 12), inputData.size() - 12), toAlloc))
+		{
+		case BZ2WDecompressOk: break;
+		case BZ2WDecompressNomem: throw ParseException(ParseException::Corrupt, "Cannot allocate memory");
+		default: throw ParseException(ParseException::Corrupt, String::Build("Cannot decompress: status ", int(status)));
+		}
 
-	if (BZ2_bzBuffToBuffDecompress((char*)bsonData, &bsonDataLen, (char*)(inputData+12), inputDataLen-12, 0, 0))
-		throw ParseException(ParseException::Corrupt, "Unable to decompress");
-
-	bson_init_data(&b, (char*)bsonData);
-	bson_iterator_init(&iter, &b);
+		try
+		{
+			b = Bson::Parse(bsonData, &opsNonconformance);
+		}
+		catch (const Bson::ParseError &ex)
+		{
+			throw ParseException(ParseException::Corrupt, "BSON error when parsing save: " + ByteString(ex.what()).FromUtf8());
+		}
+	}
 
 	std::vector<sign> tempSigns;
 
-	while(bson_iterator_next(&iter))
+	if (auto *origin = getIfType(b, "origin", Bson::Type::objectValue))
 	{
-		if(strcmp(bson_iterator_key(&iter), "signs")==0)
+		int minorVersion = 0;
+		if (copyIfInt32(*origin, "minorVersion", minorVersion))
 		{
-			if(bson_iterator_type(&iter)==BSON_ARRAY)
-			{
-				bson_iterator subiter;
-				bson_iterator_subiterator(&iter, &subiter);
-				while(bson_iterator_next(&subiter))
-				{
-					if(strcmp(bson_iterator_key(&subiter), "sign")==0)
-					{
-						if(bson_iterator_type(&subiter)==BSON_OBJECT)
-						{
-							bson_iterator signiter;
-							bson_iterator_subiterator(&subiter, &signiter);
+			version[1] = minorVersion;
+		}
+	}
+	fromNewerVersion = version > currentVersion;
 
-							sign tempSign("", 0, 0, sign::Left);
-							while(bson_iterator_next(&signiter))
-							{
-								if(strcmp(bson_iterator_key(&signiter), "text")==0 && bson_iterator_type(&signiter)==BSON_STRING)
-								{
-									tempSign.text = format::CleanString(bson_iterator_string(&signiter), true, true, true).substr(0, 45);
-								}
-								else if(strcmp(bson_iterator_key(&signiter), "justification")==0 && bson_iterator_type(&signiter)==BSON_INT)
-								{
-									tempSign.ju = (sign::Justification)bson_iterator_int(&signiter);
-								}
-								else if(strcmp(bson_iterator_key(&signiter), "x")==0 && bson_iterator_type(&signiter)==BSON_INT)
-								{
-									tempSign.x = bson_iterator_int(&signiter)+fullX;
-								}
-								else if(strcmp(bson_iterator_key(&signiter), "y")==0 && bson_iterator_type(&signiter)==BSON_INT)
-								{
-									tempSign.y = bson_iterator_int(&signiter)+fullY;
-								}
-								else
-								{
-									fprintf(stderr, "Unknown sign property %s\n", bson_iterator_key(&signiter));
-								}
-							}
-							tempSigns.push_back(tempSign);
-						}
-						else
-						{
-							fprintf(stderr, "Wrong type for %s\n", bson_iterator_key(&subiter));
-						}
-					}
-				}
-			}
-			else
-			{
-				fprintf(stderr, "Wrong type for %s\n", bson_iterator_key(&iter));
-			}
-		}
-		else if(strcmp(bson_iterator_key(&iter), "parts")==0)
+	getAddressIfUser(b, "parts", partsData);
+	getAddressIfUser(b, "partsPos", partsPosData);
+	getAddressIfUser(b, "wallMap", wallData);
+	getAddressIfUser(b, "pressMap", pressData);
+	getAddressIfUser(b, "vxMap", vxData);
+	getAddressIfUser(b, "vyMap", vyData);
+	getAddressIfUser(b, "ambientMap", ambientData);
+	getAddressIfUser(b, "blockAir", blockAirData);
+	getAddressIfUser(b, "gravity", gravityData);
+	getAddressIfUser(b, "fanMap", fanData);
+	getAddressIfUser(b, "soapLinks", soapLinkData);
+	copyIfBool(b, "legacyEnable", legacyEnable);
+	copyIfBool(b, "gravityEnable", gravityEnable);
+	copyIfBool(b, "aheat_enable", aheatEnable);
+	copyIfBool(b, "waterEEnabled", waterEEnabled);
+	copyIfBool(b, "paused", paused);
+	copyIfInt32(b, "gravityMode", gravityMode);
+	copyIfFloat(b, "customGravityX", customGravityX);
+	copyIfFloat(b, "customGravityY", customGravityY);
+	copyIfInt32(b, "airMode", airMode);
+	copyIfFloat(b, "ambientAirTemp", ambientAirTemp);
+	copyIfFloat(b, "vorticityCoeff", vorticityCoeff);
+	copyIfInt32(b, "edgeMode", edgeMode);
+	copyIfInt32(b, "pmapbits", pmapbits);
+	copyIfBool(b, "ensureDeterminism", ensureDeterminism);
+	copyIfInt64(b, "frameCount", reinterpret_cast<int64_t &>(frameCount));
+	if (copyIfUser(b, "rngState", rngState))
+	{
+		hasRngState = true;
+	}
+	if (auto *signs = getIfType(b, "signs", Bson::Type::arrayValue))
+	{
+		for (auto &signNode : signs->As<Bson::Array>())
 		{
-			if(bson_iterator_type(&iter)==BSON_BINDATA && ((unsigned char)bson_iterator_bin_type(&iter))==BSON_BIN_USER && (partsDataLen = bson_iterator_bin_len(&iter)) > 0)
+			if (!signNode.Is<Bson::Object>())
 			{
-				partsData = (unsigned char*)bson_iterator_bin_data(&iter);
+				std::cerr << "Wrong type for signs[...]" << std::endl;
+				continue;
 			}
-			else
+			sign tempSign("", 0, 0, sign::Left);
+			if (auto *text = getIfType(signNode, "text", Bson::Type::stringValue))
 			{
-				fprintf(stderr, "Invalid datatype of particle data: %d[%d] %d[%d] %d[%d]\n", bson_iterator_type(&iter), bson_iterator_type(&iter)==BSON_BINDATA, (unsigned char)bson_iterator_bin_type(&iter), ((unsigned char)bson_iterator_bin_type(&iter))==BSON_BIN_USER, bson_iterator_bin_len(&iter), bson_iterator_bin_len(&iter)>0);
-			}
-		}
-		if(strcmp(bson_iterator_key(&iter), "partsPos")==0)
-		{
-			if(bson_iterator_type(&iter)==BSON_BINDATA && ((unsigned char)bson_iterator_bin_type(&iter))==BSON_BIN_USER && (partsPosDataLen = bson_iterator_bin_len(&iter)) > 0)
-			{
-				partsPosData = (unsigned char*)bson_iterator_bin_data(&iter);
-			}
-			else
-			{
-				fprintf(stderr, "Invalid datatype of particle position data: %d[%d] %d[%d] %d[%d]\n", bson_iterator_type(&iter), bson_iterator_type(&iter)==BSON_BINDATA, (unsigned char)bson_iterator_bin_type(&iter), ((unsigned char)bson_iterator_bin_type(&iter))==BSON_BIN_USER, bson_iterator_bin_len(&iter), bson_iterator_bin_len(&iter)>0);
-			}
-		}
-		else if(strcmp(bson_iterator_key(&iter), "wallMap")==0)
-		{
-			if(bson_iterator_type(&iter)==BSON_BINDATA && ((unsigned char)bson_iterator_bin_type(&iter))==BSON_BIN_USER && (wallDataLen = bson_iterator_bin_len(&iter)) > 0)
-			{
-				wallData = (unsigned char*)bson_iterator_bin_data(&iter);
-			}
-			else
-			{
-				fprintf(stderr, "Invalid datatype of wall data: %d[%d] %d[%d] %d[%d]\n", bson_iterator_type(&iter), bson_iterator_type(&iter)==BSON_BINDATA, (unsigned char)bson_iterator_bin_type(&iter), ((unsigned char)bson_iterator_bin_type(&iter))==BSON_BIN_USER, bson_iterator_bin_len(&iter), bson_iterator_bin_len(&iter)>0);
-			}
-		}
-		else if(strcmp(bson_iterator_key(&iter), "fanMap")==0)
-		{
-			if(bson_iterator_type(&iter)==BSON_BINDATA && ((unsigned char)bson_iterator_bin_type(&iter))==BSON_BIN_USER && (fanDataLen = bson_iterator_bin_len(&iter)) > 0)
-			{
-				fanData = (unsigned char*)bson_iterator_bin_data(&iter);
-			}
-			else
-			{
-				fprintf(stderr, "Invalid datatype of fan data: %d[%d] %d[%d] %d[%d]\n", bson_iterator_type(&iter), bson_iterator_type(&iter)==BSON_BINDATA, (unsigned char)bson_iterator_bin_type(&iter), ((unsigned char)bson_iterator_bin_type(&iter))==BSON_BIN_USER, bson_iterator_bin_len(&iter), bson_iterator_bin_len(&iter)>0);
-			}
-		}
-		else if(strcmp(bson_iterator_key(&iter), "soapLinks")==0)
-		{
-			if(bson_iterator_type(&iter)==BSON_BINDATA && ((unsigned char)bson_iterator_bin_type(&iter))==BSON_BIN_USER && (soapLinkDataLen = bson_iterator_bin_len(&iter)) > 0)
-			{
-				soapLinkData = (unsigned char *)bson_iterator_bin_data(&iter);
-			}
-			else
-			{
-				fprintf(stderr, "Invalid datatype of soap data: %d[%d] %d[%d] %d[%d]\n", bson_iterator_type(&iter), bson_iterator_type(&iter)==BSON_BINDATA, (unsigned char)bson_iterator_bin_type(&iter), ((unsigned char)bson_iterator_bin_type(&iter))==BSON_BIN_USER, bson_iterator_bin_len(&iter), bson_iterator_bin_len(&iter)>0);
-			}
-		}
-		else if(strcmp(bson_iterator_key(&iter), "legacyEnable")==0)
-		{
-			if(bson_iterator_type(&iter)==BSON_BOOL)
-			{
-				legacyEnable = bson_iterator_bool(&iter);
-			}
-			else
-			{
-				fprintf(stderr, "Wrong type for %s\n", bson_iterator_key(&iter));
-			}
-		}
-		else if(strcmp(bson_iterator_key(&iter), "gravityEnable")==0)
-		{
-			if(bson_iterator_type(&iter)==BSON_BOOL)
-			{
-				gravityEnable = bson_iterator_bool(&iter);
-			}
-			else
-			{
-				fprintf(stderr, "Wrong type for %s\n", bson_iterator_key(&iter));
-			}
-		}
-		else if(!strcmp(bson_iterator_key(&iter), "aheat_enable"))
-		{
-			if(bson_iterator_type(&iter)==BSON_BOOL)
-			{
-				aheatEnable = bson_iterator_bool(&iter);
-			}
-			else
-			{
-				fprintf(stderr, "Wrong type for %s\n", bson_iterator_key(&iter));
-			}
-		}
-		else if(strcmp(bson_iterator_key(&iter), "waterEEnabled")==0)
-		{
-			if(bson_iterator_type(&iter)==BSON_BOOL)
-			{
-				waterEEnabled = bson_iterator_bool(&iter);
-			}
-			else
-			{
-				fprintf(stderr, "Wrong type for %s\n", bson_iterator_key(&iter));
-			}
-		}
-		else if(strcmp(bson_iterator_key(&iter), "paused")==0)
-		{
-			if(bson_iterator_type(&iter)==BSON_BOOL)
-			{
-				paused = bson_iterator_bool(&iter);
-			}
-			else
-			{
-				fprintf(stderr, "Wrong type for %s\n", bson_iterator_key(&iter));
-			}
-		}
-		else if(strcmp(bson_iterator_key(&iter), "gravityMode")==0)
-		{
-			if(bson_iterator_type(&iter)==BSON_INT)
-			{
-				gravityMode = bson_iterator_int(&iter);
-			}
-			else
-			{
-				fprintf(stderr, "Wrong type for %s\n", bson_iterator_key(&iter));
-			}
-		}
-		else if(strcmp(bson_iterator_key(&iter), "airMode")==0)
-		{
-			if(bson_iterator_type(&iter)==BSON_INT)
-			{
-				airMode = bson_iterator_int(&iter);
-			}
-			else
-			{
-				fprintf(stderr, "Wrong type for %s\n", bson_iterator_key(&iter));
-			}
-		}
-		else if (!strcmp(bson_iterator_key(&iter), "edgeMode"))
-		{
-			if(bson_iterator_type(&iter)==BSON_INT)
-			{
-				edgeMode = bson_iterator_int(&iter);
-			}
-			else
-			{
-				fprintf(stderr, "Wrong type for %s\n", bson_iterator_key(&iter));
-			}
-		}
-		else if(strcmp(bson_iterator_key(&iter), "palette")==0)
-		{
-			palette.clear();
-			if(bson_iterator_type(&iter)==BSON_ARRAY)
-			{
-				bson_iterator subiter;
-				bson_iterator_subiterator(&iter, &subiter);
-				while(bson_iterator_next(&subiter))
+				tempSign.text = format::CleanString(text->As<ByteString>().FromUtf8(), true, true, true).Substr(0, 45);
+				if (version < Version(94, 2))
 				{
-					if(bson_iterator_type(&subiter)==BSON_INT)
+					if (tempSign.text == "{t}")
 					{
-						std::string id = std::string(bson_iterator_key(&subiter));
-						int num = bson_iterator_int(&subiter);
-						palette.push_back(PaletteItem(id, num));
+						tempSign.text = "Temp: {t}";
 					}
+					else if (tempSign.text == "{p}")
+					{
+						tempSign.text = "Pressure: {p}";
+					}
+				}
+			}
+			if (auto *justification = getIfType(signNode, "justification", Bson::Type::int32Value))
+			{
+				tempSign.ju = (sign::Justification)justification->As<int32_t>();
+			}
+			if (auto *x = getIfType(signNode, "x", Bson::Type::int32Value))
+			{
+				tempSign.x = x->As<int32_t>()+partP.X;
+			}
+			if (auto *y = getIfType(signNode, "y", Bson::Type::int32Value))
+			{
+				tempSign.y = y->As<int32_t>()+partP.Y;
+			}
+			tempSigns.push_back(tempSign);
+		}
+	}
+	if (auto *stkmNode = getIfType(b, "stkm", Bson::Type::objectValue))
+	{
+		copyIfBool(*stkmNode, "rocketBoots1", stkm.rocketBoots1);
+		copyIfBool(*stkmNode, "rocketBoots2", stkm.rocketBoots2);
+		copyIfBool(*stkmNode, "fan1", stkm.fan1);
+		copyIfBool(*stkmNode, "fan2", stkm.fan2);
+		if (auto *rocketBootsFigh = getIfType(*stkmNode, "rocketBootsFigh", Bson::Type::arrayValue))
+		{
+			for (auto &item : rocketBootsFigh->As<Bson::Array>())
+			{
+				if (item.Is<int32_t>())
+				{
+					stkm.rocketBootsFigh.push_back(item.As<int32_t>());
 				}
 			}
 		}
-		else if (!strcmp(bson_iterator_key(&iter), "minimumVersion"))
+		if (auto *fanFigh = getIfType(*stkmNode, "fanFigh", Bson::Type::arrayValue))
 		{
-			if (bson_iterator_type(&iter) == BSON_OBJECT)
+			for (auto &item : fanFigh->As<Bson::Array>())
 			{
-				int major = INT_MAX, minor = INT_MAX;
-				bson_iterator subiter;
-				bson_iterator_subiterator(&iter, &subiter);
-				while (bson_iterator_next(&subiter))
+				if (item.Is<int32_t>())
 				{
-					if (bson_iterator_type(&subiter) == BSON_INT)
-					{
-						if (!strcmp(bson_iterator_key(&subiter), "major"))
-							major = bson_iterator_int(&subiter);
-						else if (!strcmp(bson_iterator_key(&subiter), "minor"))
-							minor = bson_iterator_int(&subiter);
-						else
-							fprintf(stderr, "Wrong type for %s\n", bson_iterator_key(&iter));
-					}
+					stkm.fanFigh.push_back(item.As<int32_t>());
 				}
-				if (major > SAVE_VERSION || (major == SAVE_VERSION && minor > MINOR_VERSION))
-				{
-					std::stringstream errorMessage;
-					errorMessage << "Save from a newer version: Requires version " << major << "." << minor;
-					throw ParseException(ParseException::WrongVersion, errorMessage.str());
-				}
-			}
-			else
-			{
-				fprintf(stderr, "Wrong type for %s\n", bson_iterator_key(&iter));
 			}
 		}
 	}
-
-	//Read wall and fan data
-	if(wallData)
+	if (auto *paletteNode = getIfType(b, "palette", Bson::Type::objectValue))
 	{
-		unsigned int j = 0;
-		if (blockW * blockH > wallDataLen)
+		palette.clear();
+		for (auto &[ id, numNode ] : paletteNode->As<Bson::Object>())
 		{
-			fprintf(stderr, "Not enough wall data\n");
-			goto fail;
-		}
-		for (unsigned int x = 0; x < blockW; x++)
-		{
-			for (unsigned int y = 0; y < blockH; y++)
+			if (numNode.GetType() == Bson::Type::int32Value)
 			{
-				if (wallData[y*blockW+x])
-					blockMap[blockY+y][blockX+x] = wallData[y*blockW+x];
-
-				if (blockMap[y][x]==O_WL_WALLELEC)
-					blockMap[y][x]=WL_WALLELEC;
-				if (blockMap[y][x]==O_WL_EWALL)
-					blockMap[y][x]=WL_EWALL;
-				if (blockMap[y][x]==O_WL_DETECT)
-					blockMap[y][x]=WL_DETECT;
-				if (blockMap[y][x]==O_WL_STREAM)
-					blockMap[y][x]=WL_STREAM;
-				if (blockMap[y][x]==O_WL_FAN||blockMap[y][x]==O_WL_FANHELPER)
-					blockMap[y][x]=WL_FAN;
-				if (blockMap[y][x]==O_WL_ALLOWLIQUID)
-					blockMap[y][x]=WL_ALLOWLIQUID;
-				if (blockMap[y][x]==O_WL_DESTROYALL)
-					blockMap[y][x]=WL_DESTROYALL;
-				if (blockMap[y][x]==O_WL_ERASE)
-					blockMap[y][x]=WL_ERASE;
-				if (blockMap[y][x]==O_WL_WALL)
-					blockMap[y][x]=WL_WALL;
-				if (blockMap[y][x]==O_WL_ALLOWAIR)
-					blockMap[y][x]=WL_ALLOWAIR;
-				if (blockMap[y][x]==O_WL_ALLOWSOLID)
-					blockMap[y][x]=WL_ALLOWSOLID;
-				if (blockMap[y][x]==O_WL_ALLOWALLELEC)
-					blockMap[y][x]=WL_ALLOWALLELEC;
-				if (blockMap[y][x]==O_WL_EHOLE)
-					blockMap[y][x]=WL_EHOLE;
-				if (blockMap[y][x]==O_WL_ALLOWGAS)
-					blockMap[y][x]=WL_ALLOWGAS;
-				if (blockMap[y][x]==O_WL_GRAV)
-					blockMap[y][x]=WL_GRAV;
-				if (blockMap[y][x]==O_WL_ALLOWENERGY)
-					blockMap[y][x]=WL_ALLOWENERGY;
-
-				if (blockMap[y][x] == WL_FAN && fanData)
-				{
-					if(j+1 >= fanDataLen)
-					{
-						fprintf(stderr, "Not enough fan data\n");
-					}
-					fanVelX[blockY+y][blockX+x] = (fanData[j++]-127.0f)/64.0f;
-					fanVelY[blockY+y][blockX+x] = (fanData[j++]-127.0f)/64.0f;
-				}
-
-				if (blockMap[y][x] >= UI_WALLCOUNT)
-					blockMap[y][x] = 0;
+				palette.push_back(PaletteItem(id, numNode.As<int32_t>()));
 			}
 		}
+	}
+	if (auto *minimumVersionNode = getIfType(b, "minimumVersion", Bson::Type::objectValue))
+	{
+		Version<2> minimumVersion;
+		{
+			int major = INT_MAX, minor = INT_MAX;
+			copyIfInt32(*minimumVersionNode, "major", major);
+			copyIfInt32(*minimumVersionNode, "minor", minor);
+			minimumVersion = Version(major, minor);
+		}
+		if (effectiveVersion < minimumVersion)
+		{
+			String errorMessage = String::Build("Save from a newer version: Requires version ", minimumVersion[0], ".", minimumVersion[1]);
+			throw ParseException(ParseException::WrongVersion, errorMessage);
+		}
+		else if (ALLOW_FAKE_NEWER_VERSION && currentVersion < minimumVersion)
+		{
+			fakeNewerVersion = true;
+		}
+	}
+	if (auto *authorsNode = getIfType(b, "authors", Bson::Type::objectValue); authorsNode && wantAuthors)
+	{
+		authors = *authorsNode;
+		TrimAuthorsIn(authors, 0);
+	}
+
+	auto paletteRemap = [this](auto maxVersion, ByteString from, ByteString to) {
+		if (version <= maxVersion)
+		{
+			auto it = std::find_if(palette.begin(), palette.end(), [&from](auto &item) {
+				return item.first == from;
+			});
+			if (it != palette.end())
+			{
+				it->first = to;
+			}
+		}
+	};
+	paletteRemap(Version(87, 1), "DEFAULT_PT_TUGN", "DEFAULT_PT_TUNG");
+	paletteRemap(Version(90, 1), "DEFAULT_PT_REPL", "DEFAULT_PT_RPEL");
+	paletteRemap(Version(92, 0), "DEFAULT_PT_E180", "DEFAULT_PT_HEAC");
+	paletteRemap(Version(92, 0), "DEFAULT_PT_E181", "DEFAULT_PT_SAWD");
+	paletteRemap(Version(92, 0), "DEFAULT_PT_E182", "DEFAULT_PT_POLO");
+	paletteRemap(Version(93, 3), "DEFAULT_PT_RAYT", "DEFAULT_PT_LDTC");
+
+	//Read wall and fan data
+	if(wallData.data())
+	{
+		auto wallDataPlane = PlaneAdapter<PlaneBase<const unsigned char>>(blockS, std::in_place, wallData.data());
+		unsigned int j = 0;
+		if (blockS.X * blockS.Y > int(wallData.size()))
+			throw ParseException(ParseException::Corrupt, "Not enough wall data");
+		for (auto bpos : blockS.OriginRect().Range<LEFT_TO_RIGHT, TOP_TO_BOTTOM>())
+		{
+			unsigned char bm = 0;
+			if (wallDataPlane[bpos])
+				bm = wallDataPlane[bpos];
+
+			switch (bm)
+			{
+			case O_WL_WALLELEC:     bm = WL_WALLELEC;     break;
+			case O_WL_EWALL:        bm = WL_EWALL;        break;
+			case O_WL_DETECT:       bm = WL_DETECT;       break;
+			case O_WL_STREAM:       bm = WL_STREAM;       break;
+			case O_WL_FAN:
+			case O_WL_FANHELPER:    bm = WL_FAN;          break;
+			case O_WL_ALLOWLIQUID:  bm = WL_ALLOWLIQUID;  break;
+			case O_WL_DESTROYALL:   bm = WL_DESTROYALL;   break;
+			case O_WL_ERASE:        bm = WL_ERASE;        break;
+			case O_WL_WALL:         bm = WL_WALL;         break;
+			case O_WL_ALLOWAIR:     bm = WL_ALLOWAIR;     break;
+			case O_WL_ALLOWSOLID:   bm = WL_ALLOWPOWDER;  break;
+			case O_WL_ALLOWALLELEC: bm = WL_ALLOWALLELEC; break;
+			case O_WL_EHOLE:        bm = WL_EHOLE;        break;
+			case O_WL_ALLOWGAS:     bm = WL_ALLOWGAS;     break;
+			case O_WL_GRAV:         bm = WL_GRAV;         break;
+			case O_WL_ALLOWENERGY:  bm = WL_ALLOWENERGY;  break;
+			}
+
+			if (bm == WL_FAN && fanData.data())
+			{
+				if(j+1 >= fanData.size())
+				{
+					fprintf(stderr, "Not enough fan data\n");
+				}
+				fanVelX[blockP + bpos] = (fanData[j++]-127.0f)/64.0f;
+				fanVelY[blockP + bpos] = (fanData[j++]-127.0f)/64.0f;
+			}
+
+			if (bm >= UI_WALLCOUNT)
+				bm = 0;
+			blockMap[blockP + bpos] = bm;
+		}
+	}
+
+	//Read pressure data
+	if (pressData.data())
+	{
+		unsigned int j = 0;
+		unsigned char i, i2;
+		if (blockS.X * blockS.Y > int(pressData.size()))
+			throw ParseException(ParseException::Corrupt, "Not enough pressure data");
+		for (auto bpos : blockS.OriginRect().Range<LEFT_TO_RIGHT, TOP_TO_BOTTOM>())
+		{
+			i = pressData[j++];
+			i2 = pressData[j++];
+			pressure[blockP + bpos] = ((i+(i2<<8))/128.0f)-256;
+		}
+		hasPressure = true;
+	}
+
+	//Read vx data
+	if (vxData.data())
+	{
+		unsigned int j = 0;
+		unsigned char i, i2;
+		if (blockS.X * blockS.Y > int(vxData.size()))
+			throw ParseException(ParseException::Corrupt, "Not enough vx data");
+		for (auto bpos : blockS.OriginRect().Range<LEFT_TO_RIGHT, TOP_TO_BOTTOM>())
+		{
+			i = vxData[j++];
+			i2 = vxData[j++];
+			velocityX[blockP + bpos] = ((i+(i2<<8))/128.0f)-256;
+		}
+	}
+
+	//Read vy data
+	if (vyData.data())
+	{
+		unsigned int j = 0;
+		unsigned char i, i2;
+		if (blockS.X * blockS.Y > int(vyData.size()))
+			throw ParseException(ParseException::Corrupt, "Not enough vy data");
+		for (auto bpos : blockS.OriginRect().Range<LEFT_TO_RIGHT, TOP_TO_BOTTOM>())
+		{
+			i = vyData[j++];
+			i2 = vyData[j++];
+			velocityY[blockP + bpos] = ((i+(i2<<8))/128.0f)-256;
+		}
+	}
+
+	//Read ambient data
+	if (ambientData.data())
+	{
+		unsigned int i = 0, tempTemp;
+		if (blockS.X * blockS.Y > int(ambientData.size()))
+			throw ParseException(ParseException::Corrupt, "Not enough ambient heat data");
+		for (auto bpos : blockS.OriginRect().Range<LEFT_TO_RIGHT, TOP_TO_BOTTOM>())
+		{
+			tempTemp = ambientData[i++];
+			tempTemp |= (((unsigned)ambientData[i++]) << 8);
+			ambientHeat[blockP + bpos] = float(tempTemp);
+		}
+		hasAmbientHeat = true;
+	}
+
+	if (blockAirData.data())
+	{
+		if (blockS.X * blockS.Y * 2 > int(blockAirData.size()))
+			throw ParseException(ParseException::Corrupt, "Not enough block air data");
+		auto blockAirDataPlane = PlaneAdapter<PlaneBase<const unsigned char>>(blockS, std::in_place, blockAirData.data());
+		auto blockAirhDataPlane = PlaneAdapter<PlaneBase<const unsigned char>>(blockS, std::in_place, blockAirData.data() + blockS.X * blockS.Y);
+		for (auto bpos : blockS.OriginRect().Range<LEFT_TO_RIGHT, TOP_TO_BOTTOM>())
+		{
+			blockAir [blockP + bpos] = blockAirDataPlane [bpos];
+			blockAirh[blockP + bpos] = blockAirhDataPlane[bpos];
+		}
+		hasBlockAirMaps = true;
+	}
+
+	if (gravityData.data())
+	{
+		if (blockS.X * blockS.Y * 4 > int(gravityData.size()))
+		{
+			throw ParseException(ParseException::Corrupt, "Not enough gravity data");
+		}
+		auto massDataPlane   = PlaneAdapter<PlaneBase<const float   >>(blockS, std::in_place, reinterpret_cast<const float    *>(gravityData.data()                                          ));
+		auto maskDataPlane   = PlaneAdapter<PlaneBase<const uint32_t>>(blockS, std::in_place, reinterpret_cast<const uint32_t *>(gravityData.data() +     blockS.X * blockS.Y * sizeof(float)));
+		auto forceXDataPlane = PlaneAdapter<PlaneBase<const float   >>(blockS, std::in_place, reinterpret_cast<const float    *>(gravityData.data() + 2 * blockS.X * blockS.Y * sizeof(float)));
+		auto forceYDataPlane = PlaneAdapter<PlaneBase<const float   >>(blockS, std::in_place, reinterpret_cast<const float    *>(gravityData.data() + 3 * blockS.X * blockS.Y * sizeof(float)));
+		for (auto bpos : blockS.OriginRect().Range<LEFT_TO_RIGHT, TOP_TO_BOTTOM>())
+		{
+			gravMass  [blockP + bpos] = massDataPlane  [bpos];
+			gravMask  [blockP + bpos] = maskDataPlane  [bpos];
+			gravForceX[blockP + bpos] = forceXDataPlane[bpos];
+			gravForceY[blockP + bpos] = forceYDataPlane[bpos];
+		}
+		hasGravityMaps = true;
 	}
 
 	//Read particle data
-	if (partsData && partsPosData)
+	if (partsData.data() && partsPosData.data())
 	{
-		int newIndex = 0, fieldDescriptor, tempTemp;
+		int newIndex = 0, tempTemp;
 		int posCount, posTotal, partsPosDataIndex = 0;
-		if (fullW * fullH * 3 > partsPosDataLen)
-		{
-			fprintf(stderr, "Not enough particle position data\n");
-			goto fail;
-		}
+		if (partS.X * partS.Y * 3 > int(partsPosData.size()))
+			throw ParseException(ParseException::Corrupt, "Not enough particle position data");
 
-		partsSimIndex = (unsigned int*)calloc(NPART, sizeof(unsigned));
 		partsCount = 0;
 
 		unsigned int i = 0;
-		unsigned int saved_x, saved_y, x, y;
+		auto partsDataLen = static_cast<unsigned int>(partsData.size());
 		newIndex = 0;
-		for (saved_y = 0; saved_y < fullH; saved_y++)
+		for (auto pos : RectSized(partP, partS).Range<TOP_TO_BOTTOM, LEFT_TO_RIGHT>())
 		{
-			for (saved_x = 0; saved_x < fullW; saved_x++)
+			//Read total number of particles at this position
+			posTotal = 0;
+			posTotal |= partsPosData[partsPosDataIndex++]<<16;
+			posTotal |= partsPosData[partsPosDataIndex++]<<8;
+			posTotal |= partsPosData[partsPosDataIndex++];
+			//Put the next posTotal particles at this position
+			for (posCount = 0; posCount < posTotal; posCount++)
 			{
-				//Read total number of particles at this position
-				posTotal = 0;
-				posTotal |= partsPosData[partsPosDataIndex++]<<16;
-				posTotal |= partsPosData[partsPosDataIndex++]<<8;
-				posTotal |= partsPosData[partsPosDataIndex++];
-				//Put the next posTotal particles at this position
-				for (posCount = 0; posCount < posTotal; posCount++)
+				particlesCount = newIndex+1;
+				//i+3 because we have 4 bytes of required fields (type (1), descriptor (2), temp (1))
+				if (i+3 >= partsDataLen)
+					throw ParseException(ParseException::Corrupt, "Ran past particle data buffer");
+				unsigned int fieldDescriptor = (unsigned int)(partsData[i+1]);
+				fieldDescriptor |= (unsigned int)(partsData[i+2]) << 8;
+
+				if (newIndex < 0 || newIndex >= NPART)
+					throw ParseException(ParseException::Corrupt, "Too many particles");
+
+				//Clear the particle, ready for our new properties
+				memset(&(particles[newIndex]), 0, sizeof(Particle));
+
+				//Required fields
+				particles[newIndex].type = partsData[i];
+				particles[newIndex].x = float(pos.X);
+				particles[newIndex].y = float(pos.Y);
+				i+=3;
+
+				// Read type (2nd byte)
+				if (fieldDescriptor & 0x4000)
+					particles[newIndex].type |= (((unsigned)partsData[i++]) << 8);
+
+				//Read temp
+				if(fieldDescriptor & 0x01)
 				{
-					particlesCount = newIndex+1;
-					if (newIndex >= NPART)
+					//Full 16bit int
+					tempTemp = partsData[i++];
+					tempTemp |= (((unsigned)partsData[i++]) << 8);
+					particles[newIndex].temp = float(tempTemp);
+				}
+				else
+				{
+					//1 Byte room temp offset
+					tempTemp = partsData[i++];
+					if (tempTemp >= 0x80)
 					{
-						goto fail;
+						tempTemp -= 0x100;
 					}
+					particles[newIndex].temp = tempTemp+294.15f;
+				}
 
-					//i+3 because we have 4 bytes of required fields (type (1), descriptor (2), temp (1))
+				// fieldDesc3
+				if (fieldDescriptor & 0x8000)
+				{
+					if (i >= partsDataLen)
+						throw ParseException(ParseException::Corrupt, "Ran past particle data buffer while loading third byte of field descriptor");
+					fieldDescriptor |= (unsigned int)(partsData[i++]) << 16;
+				}
+
+				//Read life
+				if(fieldDescriptor & 0x02)
+				{
+					if (i >= partsDataLen)
+						throw ParseException(ParseException::Corrupt, "Ran past particle data buffer while loading life");
+					particles[newIndex].life = partsData[i++];
+					//i++;
+					//Read 2nd byte
+					if(fieldDescriptor & 0x04)
+					{
+						if (i >= partsDataLen)
+							throw ParseException(ParseException::Corrupt, "Ran past particle data buffer while loading life");
+						particles[newIndex].life |= (((unsigned)partsData[i++]) << 8);
+					}
+				}
+
+				//Read tmp
+				if(fieldDescriptor & 0x08)
+				{
+					if (i >= partsDataLen)
+						throw ParseException(ParseException::Corrupt, "Ran past particle data buffer while loading tmp");
+					particles[newIndex].tmp = partsData[i++];
+					//Read 2nd byte
+					if(fieldDescriptor & 0x10)
+					{
+						if (i >= partsDataLen)
+							throw ParseException(ParseException::Corrupt, "Ran past particle data buffer while loading tmp");
+						particles[newIndex].tmp |= (((unsigned)partsData[i++]) << 8);
+						//Read 3rd and 4th bytes
+						if(fieldDescriptor & 0x1000)
+						{
+							if (i+1 >= partsDataLen)
+								throw ParseException(ParseException::Corrupt, "Ran past particle data buffer while loading tmp");
+							particles[newIndex].tmp |= (((unsigned)partsData[i++]) << 24);
+							particles[newIndex].tmp |= (((unsigned)partsData[i++]) << 16);
+						}
+					}
+				}
+
+				//Read ctype
+				if(fieldDescriptor & 0x20)
+				{
+					if (i >= partsDataLen)
+						throw ParseException(ParseException::Corrupt, "Ran past particle data buffer while loading ctype");
+					particles[newIndex].ctype = partsData[i++];
+					//Read additional bytes
+					if(fieldDescriptor & 0x200)
+					{
+						if (i+2 >= partsDataLen)
+							throw ParseException(ParseException::Corrupt, "Ran past particle data buffer while loading ctype");
+						particles[newIndex].ctype |= (((unsigned)partsData[i++]) << 24);
+						particles[newIndex].ctype |= (((unsigned)partsData[i++]) << 16);
+						particles[newIndex].ctype |= (((unsigned)partsData[i++]) << 8);
+					}
+				}
+
+				//Read dcolour
+				if(fieldDescriptor & 0x40)
+				{
 					if (i+3 >= partsDataLen)
-						goto fail;
-					x = saved_x + fullX;
-					y = saved_y + fullY;
-					fieldDescriptor = partsData[i+1];
-					fieldDescriptor |= partsData[i+2] << 8;
-					if (x >= fullW || y >= fullH)
+						throw ParseException(ParseException::Corrupt, "Ran past particle data buffer while loading deco");
+					particles[newIndex].dcolour = (((unsigned)partsData[i++]) << 24);
+					particles[newIndex].dcolour |= (((unsigned)partsData[i++]) << 16);
+					particles[newIndex].dcolour |= (((unsigned)partsData[i++]) << 8);
+					particles[newIndex].dcolour |= ((unsigned)partsData[i++]);
+				}
+
+				//Read vx
+				if(fieldDescriptor & 0x80)
+				{
+					if (i >= partsDataLen)
+						throw ParseException(ParseException::Corrupt, "Ran past particle data buffer while loading vx");
+					particles[newIndex].vx = (partsData[i++]-127.0f)/16.0f;
+				}
+
+				//Read vy
+				if(fieldDescriptor & 0x100)
+				{
+					if (i >= partsDataLen)
+						throw ParseException(ParseException::Corrupt, "Ran past particle data buffer while loading vy");
+					particles[newIndex].vy = (partsData[i++]-127.0f)/16.0f;
+				}
+
+				//Read tmp2
+				if(fieldDescriptor & 0x400)
+				{
+					if (i >= partsDataLen)
+						throw ParseException(ParseException::Corrupt, "Ran past particle data buffer while loading tmp2");
+					particles[newIndex].tmp2 = partsData[i++];
+					if(fieldDescriptor & 0x800)
 					{
-						fprintf(stderr, "Out of range [%d]: %d %d, [%d, %d], [%d, %d]\n", i, x, y, (unsigned)partsData[i+1], (unsigned)partsData[i+2], (unsigned)partsData[i+3], (unsigned)partsData[i+4]);
-						goto fail;
+						if (i >= partsDataLen)
+							throw ParseException(ParseException::Corrupt, "Ran past particle data buffer while loading tmp2");
+						particles[newIndex].tmp2 |= (((unsigned)partsData[i++]) << 8);
 					}
+				}
 
-					if (newIndex < 0 || newIndex >= NPART)
-						goto fail;
-
-					//Store partsptr index+1 for this saved particle index (0 means not loaded)
-					partsSimIndex[partsCount++] = newIndex+1;
-
-					//Clear the particle, ready for our new properties
-					memset(&(particles[newIndex]), 0, sizeof(Particle));
-
-					//Required fields
-					particles[newIndex].type = partsData[i];
-					particles[newIndex].x = x;
-					particles[newIndex].y = y;
-					i+=3;
-
-					//Read temp
-					if(fieldDescriptor & 0x01)
+				//Read tmp3 and tmp4
+				if(fieldDescriptor & 0x2000)
+				{
+					if (i+3 >= partsDataLen)
+						throw ParseException(ParseException::Corrupt, "Ran past particle data buffer while loading tmp3 and tmp4");
+					if (fieldDescriptor & 0x10000 && i+7 >= partsDataLen)
+						throw ParseException(ParseException::Corrupt, "Ran past particle data buffer while loading high halves of tmp3 and tmp4");
+					unsigned int tmp34;
+					tmp34  = (unsigned int)partsData[i + 0];
+					tmp34 |= (unsigned int)partsData[i + 1] << 8;
+					if (fieldDescriptor & 0x10000)
 					{
-						//Full 16bit int
-						tempTemp = partsData[i++];
-						tempTemp |= (((unsigned)partsData[i++]) << 8);
-						particles[newIndex].temp = tempTemp;
+						tmp34 |= (unsigned int)partsData[i + 4] << 16;
+						tmp34 |= (unsigned int)partsData[i + 5] << 24;
 					}
-					else
+					particles[newIndex].tmp3 = int(tmp34);
+					tmp34  = (unsigned int)partsData[i + 2];
+					tmp34 |= (unsigned int)partsData[i + 3] << 8;
+					if (fieldDescriptor & 0x10000)
 					{
-						//1 Byte room temp offset
-						tempTemp = (char)partsData[i++];
-						particles[newIndex].temp = tempTemp+294.15f;
+						tmp34 |= (unsigned int)partsData[i + 6] << 16;
+						tmp34 |= (unsigned int)partsData[i + 7] << 24;
 					}
+					particles[newIndex].tmp4 = int(tmp34);
+					i += 4;
+					if (fieldDescriptor & 0x10000)
+						i += 4;
+				}
 
-					//Read life
-					if(fieldDescriptor & 0x02)
+				//Particle specific parsing:
+				switch(particles[newIndex].type)
+				{
+				case PT_SOAP:
+					//Clear soap links, links will be added back in if soapLinkData is present
+					particles[newIndex].ctype &= ~6;
+					break;
+				case PT_BOMB:
+					if (particles[newIndex].tmp!=0 && savedVersion < 81)
 					{
-						if(i >= partsDataLen) goto fail;
-						particles[newIndex].life = partsData[i++];
-						//Read 2nd byte
-						if(fieldDescriptor & 0x04)
-						{
-							if(i >= partsDataLen) goto fail;
-							particles[newIndex].life |= (((unsigned)partsData[i++]) << 8);
-						}
+						particles[newIndex].type = PT_EMBR;
+						particles[newIndex].ctype = 0;
+						if (particles[newIndex].tmp==1)
+							particles[newIndex].tmp = 0;
 					}
-
-					//Read tmp
-					if(fieldDescriptor & 0x08)
+					break;
+				case PT_DUST:
+					if (particles[newIndex].life>0 && savedVersion < 81)
 					{
-						if(i >= partsDataLen) goto fail;
-						particles[newIndex].tmp = partsData[i++];
-						//Read 2nd byte
-						if(fieldDescriptor & 0x10)
-						{
-							if(i >= partsDataLen) goto fail;
-							particles[newIndex].tmp |= (((unsigned)partsData[i++]) << 8);
-							//Read 3rd and 4th bytes
-							if(fieldDescriptor & 0x1000)
-							{
-								if(i+1 >= partsDataLen) goto fail;
-								particles[newIndex].tmp |= (((unsigned)partsData[i++]) << 24);
-								particles[newIndex].tmp |= (((unsigned)partsData[i++]) << 16);
-							}
-						}
+						particles[newIndex].type = PT_EMBR;
+						particles[newIndex].ctype = (particles[newIndex].tmp2<<16) | (particles[newIndex].tmp<<8) | particles[newIndex].ctype;
+						particles[newIndex].tmp = 1;
 					}
-
-					//Read ctype
-					if(fieldDescriptor & 0x20)
+					break;
+				case PT_FIRW:
+					if (particles[newIndex].tmp>=2 && savedVersion < 81)
 					{
-						if(i >= partsDataLen) goto fail;
-						particles[newIndex].ctype = partsData[i++];
-						//Read additional bytes
-						if(fieldDescriptor & 0x200)
-						{
-							if(i+2 >= partsDataLen) goto fail;
-							particles[newIndex].ctype |= (((unsigned)partsData[i++]) << 24);
-							particles[newIndex].ctype |= (((unsigned)partsData[i++]) << 16);
-							particles[newIndex].ctype |= (((unsigned)partsData[i++]) << 8);
-						}
+						particles[newIndex].type = PT_EMBR;
+						particles[newIndex].ctype = Renderer::firwTableAt(particles[newIndex].tmp - 4).Pack();
+						particles[newIndex].tmp = 1;
 					}
-
-					//Read dcolour
-					if(fieldDescriptor & 0x40)
+					break;
+				case PT_PSTN:
+					if (savedVersion < 87 && particles[newIndex].ctype)
+						particles[newIndex].life = 1;
+					if (savedVersion < 91)
+						particles[newIndex].temp = 283.15f;
+					break;
+				case PT_FILT:
+					if (savedVersion < 89)
 					{
-						if(i+3 >= partsDataLen) goto fail;
-						particles[newIndex].dcolour = (((unsigned)partsData[i++]) << 24);
-						particles[newIndex].dcolour |= (((unsigned)partsData[i++]) << 16);
-						particles[newIndex].dcolour |= (((unsigned)partsData[i++]) << 8);
-						particles[newIndex].dcolour |= ((unsigned)partsData[i++]);
+						if (particles[newIndex].tmp<0 || particles[newIndex].tmp>3)
+							particles[newIndex].tmp = 6;
+						particles[newIndex].ctype = 0;
 					}
-
-					//Read vx
-					if(fieldDescriptor & 0x80)
+					break;
+				case PT_QRTZ:
+				case PT_PQRT:
+					if (savedVersion < 89)
 					{
-						if(i >= partsDataLen) goto fail;
-						particles[newIndex].vx = (partsData[i++]-127.0f)/16.0f;
+						particles[newIndex].tmp2 = particles[newIndex].tmp;
+						particles[newIndex].tmp = particles[newIndex].ctype;
+						particles[newIndex].ctype = 0;
 					}
-
-					//Read vy
-					if(fieldDescriptor & 0x100)
+					break;
+				case PT_PHOT:
+					if (savedVersion < 90)
 					{
-						if(i >= partsDataLen) goto fail;
-						particles[newIndex].vy = (partsData[i++]-127.0f)/16.0f;
+						particles[newIndex].flags |= FLAG_PHOTDECO;
 					}
-
-					//Read tmp2
-					if(fieldDescriptor & 0x400)
-					{
-						if(i >= partsDataLen) goto fail;
-						particles[newIndex].tmp2 = partsData[i++];
-						if(fieldDescriptor & 0x800)
-						{
-							if(i >= partsDataLen) goto fail;
-							particles[newIndex].tmp2 |= (((unsigned)partsData[i++]) << 8);
-						}
-					}
-
-					//Read pavg
-					if(fieldDescriptor & 0x2000)
-					{
-						if(i+3 >= partsDataLen) goto fail;
-						int pavg;
-						pavg = partsData[i++];
-						pavg |= (((unsigned)partsData[i++]) << 8);
-						particles[newIndex].pavg[0] = (float)pavg;
-						pavg = partsData[i++];
-						pavg |= (((unsigned)partsData[i++]) << 8);
-						particles[newIndex].pavg[1] = (float)pavg;
-					}
-
-					//Particle specific parsing:
-					switch(particles[newIndex].type)
-					{
-					case PT_SOAP:
-						//Clear soap links, links will be added back in if soapLinkData is present
-						particles[newIndex].ctype &= ~6;
-						break;
-					case PT_BOMB:
-						if (particles[newIndex].tmp!=0 && savedVersion < 81)
-						{
-							particles[newIndex].type = PT_EMBR;
-							particles[newIndex].ctype = 0;
-							if (particles[newIndex].tmp==1)
-								particles[newIndex].tmp = 0;
-						}
-						break;
-					case PT_DUST:
-						if (particles[newIndex].life>0 && savedVersion < 81)
-						{
-							particles[newIndex].type = PT_EMBR;
-							particles[newIndex].ctype = (particles[newIndex].tmp2<<16) | (particles[newIndex].tmp<<8) | particles[newIndex].ctype;
-							particles[newIndex].tmp = 1;
-						}
-						break;
-					case PT_FIRW:
-						if (particles[newIndex].tmp>=2 && savedVersion < 81)
-						{
-							int caddress = restrict_flt(restrict_flt((float)(particles[newIndex].tmp-4), 0.0f, 200.0f)*3, 0.0f, (200.0f*3)-3);
-							particles[newIndex].type = PT_EMBR;
-							particles[newIndex].tmp = 1;
-							particles[newIndex].ctype = (((firw_data[caddress]))<<16) | (((firw_data[caddress+1]))<<8) | ((firw_data[caddress+2]));
-						}
-						break;
-					case PT_PSTN:
-						if (savedVersion < 87 && particles[newIndex].ctype)
-							particles[newIndex].life = 1;
-						if (savedVersion < 91)
-							particles[newIndex].temp = 283.15;
-						break;
-					case PT_STKM:
-					case PT_STKM2:
-					case PT_FIGH:
-						if (savedVersion < 88 && particles[newIndex].ctype == OLD_SPC_AIR)
-							particles[newIndex].ctype = SPC_AIR;
-						break;
-					case PT_FILT:
-						if (savedVersion < 89)
-						{
-							if (particles[newIndex].tmp<0 || particles[newIndex].tmp>3)
-								particles[newIndex].tmp = 6;
-							particles[newIndex].ctype = 0;
-						}
-						break;
-					case PT_QRTZ:
-					case PT_PQRT:
-						if (savedVersion < 89)
-						{
-							particles[newIndex].tmp2 = particles[newIndex].tmp;
-							particles[newIndex].tmp = particles[newIndex].ctype;
-							particles[newIndex].ctype = 0;
-						}
-						break;
-					case PT_PHOT:
-						if (savedVersion < 90)
-						{
-							particles[newIndex].flags |= FLAG_PHOTDECO;
-						}
-						break;
-					case PT_VINE:
-						if (savedVersion < 91)
-						{
-							particles[newIndex].tmp = 1;
-						}
-						break;
-					case PT_DLAY:
-						// correct DLAY temperature in older saves
-						// due to either the +.5f now done in DLAY (higher temps), or rounding errors in the old DLAY code (room temperature temps),
-						// the delay in all DLAY from older versions will always be one greater than it should
-						if (savedVersion < 91)
-						{
-							particles[newIndex].temp = particles[newIndex].temp - 1.0f;
-						}
-						break;
-					case PT_CRAY:
-						if (savedVersion < 91)
-						{
-							if (particles[newIndex].tmp2)
-							{
-								particles[newIndex].ctype |= particles[newIndex].tmp2<<8;
-								particles[newIndex].tmp2 = 0;
-							}
-						}
-						break;
-					case PT_CONV:
-						if (savedVersion < 91)
-						{
-							if (particles[newIndex].tmp)
-							{
-								particles[newIndex].ctype |= particles[newIndex].tmp<<8;
-								particles[newIndex].tmp = 0;
-							}
-						}
-						break;
-					}
+					break;
+				case PT_VINE:
 					if (savedVersion < 91)
 					{
-						if (particles[newIndex].type == PT_WIFI)
-							particles[newIndex].flags |= FLAG_COMPAT;
+						particles[newIndex].tmp = 1;
 					}
-					//note: PSv was used in version 77.0 and every version before, add something in PSv too if the element is that old
-					newIndex++;
+					break;
+				case PT_DLAY:
+					// correct DLAY temperature in older saves
+					// due to either the +.5f now done in DLAY (higher temps), or rounding errors in the old DLAY code (room temperature temps),
+					// the delay in all DLAY from older versions will always be one greater than it should
+					if (savedVersion < 91)
+					{
+						particles[newIndex].temp = particles[newIndex].temp - 1.0f;
+					}
+					break;
+				case PT_CRAY:
+					if (savedVersion < 91)
+					{
+						if (particles[newIndex].tmp2)
+						{
+							particles[newIndex].ctype |= particles[newIndex].tmp2<<8;
+							particles[newIndex].tmp2 = 0;
+						}
+					}
+					break;
+				case PT_CONV:
+					if (savedVersion < 91)
+					{
+						if (particles[newIndex].tmp)
+						{
+							particles[newIndex].ctype |= particles[newIndex].tmp<<8;
+							particles[newIndex].tmp = 0;
+						}
+					}
+					break;
+				case PT_PIPE:
+				case PT_PPIP:
+					if (savedVersion < 93 && !fakeNewerVersion)
+					{
+						if (particles[newIndex].ctype == 1)
+							particles[newIndex].tmp |= 0x00020000; //PFLAG_INITIALIZING
+						particles[newIndex].tmp |= (particles[newIndex].ctype-1)<<18;
+						particles[newIndex].ctype = particles[newIndex].tmp&0xFF;
+					}
+					break;
+				case PT_TSNS:
+				case PT_HSWC:
+				case PT_PSNS:
+				case PT_PUMP:
+					if (savedVersion < 93 && !fakeNewerVersion)
+					{
+						particles[newIndex].tmp = 0;
+					}
+					break;
+				case PT_LIFE:
+					if (savedVersion < 96 && !fakeNewerVersion)
+					{
+						if (particles[newIndex].ctype >= 0 && particles[newIndex].ctype < NGOL)
+						{
+							particles[newIndex].tmp2 = particles[newIndex].tmp;
+							if (!particles[newIndex].dcolour)
+								particles[newIndex].dcolour = builtinGol[particles[newIndex].ctype].colour.Pack();
+							particles[newIndex].tmp = builtinGol[particles[newIndex].ctype].colour2.Pack();
+						}
+					}
 				}
+				if (PressureInTmp3(particles[newIndex].type))
+				{
+					// pavg[1] used to be saved as a u16, which PressureInTmp3 elements then treated as
+					// an i16. tmp3 is now saved as a u32, or as a u16 if it's small enough. PressureInTmp3
+					// elements will never use the upper 16 bits, and should still treat the lower 16 bits
+					// as an i16, so they need sign extension.
+					auto tmp3 = (unsigned int)(particles[newIndex].tmp3);
+					if (tmp3 & 0x8000U)
+					{
+						tmp3 |= 0xFFFF0000U;
+						particles[newIndex].tmp3 = int(tmp3);
+					}
+				}
+				//note: PSv was used in version 77.0 and every version before, add something in PSv too if the element is that old
+				newIndex++;
+				partsCount++;
 			}
 		}
-		if (soapLinkData)
-		{
-			unsigned int soapLinkDataPos = 0;
-			for (unsigned int i = 0; i < partsCount; i++)
-			{
-				if (partsSimIndex[i] && particles[partsSimIndex[i]-1].type == PT_SOAP)
-				{
-					// Get the index of the particle forward linked from this one, if present in the save data
-					unsigned int linkedIndex = 0;
-					if (soapLinkDataPos+3 > soapLinkDataLen) break;
-					linkedIndex |= soapLinkData[soapLinkDataPos++]<<16;
-					linkedIndex |= soapLinkData[soapLinkDataPos++]<<8;
-					linkedIndex |= soapLinkData[soapLinkDataPos++];
-					// All indexes in soapLinkData and partsSimIndex have 1 added to them (0 means not saved/loaded)
-					if (!linkedIndex || linkedIndex-1>=partsCount || !partsSimIndex[linkedIndex-1])
-						continue;
-					linkedIndex = partsSimIndex[linkedIndex-1]-1;
-					newIndex = partsSimIndex[i]-1;
 
-					//Attach the two particles
-					particles[newIndex].ctype |= 2;
-					particles[newIndex].tmp = linkedIndex;
-					particles[linkedIndex].ctype |= 4;
-					particles[linkedIndex].tmp2 = newIndex;
-				}
+		if (i != partsDataLen)
+			throw ParseException(ParseException::Corrupt, "Didn't reach end of particle data buffer");
+	}
+
+	if (soapLinkData.data())
+	{
+		unsigned int soapLinkDataPos = 0;
+		for (unsigned int i = 0; i < partsCount; i++)
+		{
+			if (particles[i].type == PT_SOAP)
+			{
+				// Get the index of the particle forward linked from this one, if present in the save data
+				unsigned int linkedIndex = 0;
+				if (soapLinkDataPos+3 > soapLinkData.size()) break;
+				linkedIndex |= soapLinkData[soapLinkDataPos++]<<16;
+				linkedIndex |= soapLinkData[soapLinkDataPos++]<<8;
+				linkedIndex |= soapLinkData[soapLinkDataPos++];
+				// All indexes in soapLinkData and partsSimIndex have 1 added to them (0 means not saved/loaded)
+				if (!linkedIndex || linkedIndex-1 >= partsCount)
+					continue;
+				linkedIndex = linkedIndex-1;
+
+				//Attach the two particles
+				particles[i].ctype |= 2;
+				particles[i].tmp = linkedIndex;
+				particles[linkedIndex].ctype |= 4;
+				particles[linkedIndex].tmp2 = i;
 			}
 		}
 	}
 
-	if(tempSigns.size())
+	if (tempSigns.size())
 	{
 		for (size_t i = 0; i < tempSigns.size(); i++)
 		{
@@ -1146,63 +1279,41 @@ void GameSave::readOPS(char * data, int dataLength)
 			signs.push_back(tempSigns[i]);
 		}
 	}
-	goto fin;
-fail:
-	//Clean up everything
-	bson_destroy(&b);
-	free(freeIndices);
-	free(partsSimIndex);
-	throw ParseException(ParseException::Corrupt, "Save data corrupt");
-fin:
-	bson_destroy(&b);
-	free(freeIndices);
-	free(partsSimIndex);
 }
 
-void GameSave::readPSv(char * data, int dataLength)
+#define MTOS_EXPAND(str) #str
+#define MTOS(str) MTOS_EXPAND(str)
+void GameSave::readPSv(const std::vector<char> &dataVec)
 {
-	unsigned char * d = NULL, * c = (unsigned char *)data;
-	int q,i,j,k,x,y,p=0,*m=NULL, ver, pty, ty, legacy_beta=0;
-	int bx0=0, by0=0, bw, bh, w, h, y0 = 0, x0 = 0;
+	auto &builtinGol = SimulationData::builtinGol;
+	Renderer::PopulateTables();
+
+	auto *saveData = reinterpret_cast<const unsigned char *>(dataVec.data());
+	auto dataLength = int(dataVec.size());
+	int q,p=0, pty, ty, legacy_beta=0;
+	Vec2<int> blockP = { 0, 0 };
 	int new_format = 0, ttv = 0;
-	int *fp = (int *)malloc(NPART*sizeof(int));
 
 	std::vector<sign> tempSigns;
 	char tempSignText[255];
 	sign tempSign("", 0, 0, sign::Left);
 
-	//Gol data used to read older saves
-	int goltype[NGOL];
-	int grule[NGOL+1][10];
-
-	int golRulesCount;
-	int * golRulesT = LoadGOLRules(golRulesCount);
-	memcpy(grule, golRulesT, sizeof(int) * (golRulesCount*10));
-	free(golRulesT);
-
-	int golTypesCount;
-	int * golTypesT = LoadGOLTypes(golTypesCount);
-	memcpy(goltype, golTypesT, sizeof(int) * (golTypesCount));
-	free(golTypesT);
-
-	std::vector<Element> elements = GetElements();
-
-	try
-	{
+	auto &builtinElements = GetElements();
 
 	//New file header uses PSv, replacing fuC. This is to detect if the client uses a new save format for temperatures
 	//This creates a problem for old clients, that display and "corrupt" error instead of a "newer version" error
 
 	if (dataLength<16)
 		throw ParseException(ParseException::Corrupt, "No save data");
-	if (!(c[2]==0x43 && c[1]==0x75 && c[0]==0x66) && !(c[2]==0x76 && c[1]==0x53 && c[0]==0x50))
+	if (!(saveData[2]==0x43 && saveData[1]==0x75 && saveData[0]==0x66) && !(saveData[2]==0x76 && saveData[1]==0x53 && saveData[0]==0x50))
 		throw ParseException(ParseException::Corrupt, "Unknown format");
-	if (c[2]==0x76 && c[1]==0x53 && c[0]==0x50) {
+	if (saveData[2]==0x76 && saveData[1]==0x53 && saveData[0]==0x50) {
 		new_format = 1;
 	}
-	if (c[4]>SAVE_VERSION)
+	if (saveData[4]>97) // this used to respect currentVersion but no valid PSv will ever have a version > 97 so it's ok to hardcode
 		throw ParseException(ParseException::WrongVersion, "Save from newer version");
-	ver = c[4];
+	version = { saveData[4], 0 };
+	auto ver = version[0];
 
 	if (ver<34)
 	{
@@ -1211,199 +1322,168 @@ void GameSave::readPSv(char * data, int dataLength)
 	else
 	{
 		if (ver>=44) {
-			legacyEnable = c[3]&0x01;
-			paused = (c[3]>>1)&0x01;
+			legacyEnable = saveData[3]&0x01;
+			paused = (saveData[3]>>1)&0x01;
 			if (ver>=46) {
-				gravityMode = ((c[3]>>2)&0x03);// | ((c[3]>>2)&0x01);
-				airMode = ((c[3]>>4)&0x07);// | ((c[3]>>4)&0x02) | ((c[3]>>4)&0x01);
+				gravityMode = ((saveData[3]>>2)&0x03);// | ((c[3]>>2)&0x01);
+				airMode = ((saveData[3]>>4)&0x07);// | ((c[3]>>4)&0x02) | ((c[3]>>4)&0x01);
 			}
 			if (ver>=49) {
-				gravityEnable = ((c[3]>>7)&0x01);
+				gravityEnable = ((saveData[3]>>7)&0x01);
 			}
 		} else {
-			if (c[3]==1||c[3]==0) {
-				legacyEnable = c[3];
+			if (saveData[3]==1||saveData[3]==0) {
+				legacyEnable = saveData[3];
 			} else {
 				legacy_beta = 1;
 			}
 		}
 	}
 
-	bw = c[6];
-	bh = c[7];
-	if (bx0+bw > XRES/CELL)
-		bx0 = XRES/CELL - bw;
-	if (by0+bh > YRES/CELL)
-		by0 = YRES/CELL - bh;
-	if (bx0 < 0)
-		bx0 = 0;
-	if (by0 < 0)
-		by0 = 0;
+	auto blockS = Vec2{ int(saveData[6]), int(saveData[7]) };
+	blockP = blockP.Clamp(blockS.OriginRect());
 
-	if (c[5]!=CELL || bx0+bw>XRES/CELL || by0+bh>YRES/CELL)
+	if (saveData[5]!=CELL || blockP.X+blockS.X>XCELLS || blockP.Y+blockS.Y>YCELLS)
 		throw ParseException(ParseException::InvalidDimensions, "Save too large");
-	i = (unsigned)c[8];
-	i |= ((unsigned)c[9])<<8;
-	i |= ((unsigned)c[10])<<16;
-	i |= ((unsigned)c[11])<<24;
-	
-	if(i > 209715200 || !i)
+	int size = (unsigned)saveData[8];
+	size |= ((unsigned)saveData[9])<<8;
+	size |= ((unsigned)saveData[10])<<16;
+	size |= ((unsigned)saveData[11])<<24;
+
+	if (size > 209715200 || !size)
 		throw ParseException(ParseException::InvalidDimensions, "Save data too large");
-	
-	d = (unsigned char *)malloc(i);
-	if (!d)
-		throw ParseException(ParseException::Corrupt, "Cannot allocate memory");
 
-	setSize(bw, bh);
-
-	int bzStatus = 0;
-	if ((bzStatus = BZ2_bzBuffToBuffDecompress((char *)d, (unsigned *)&i, (char *)(c+12), dataLength-12, 0, 0)))
+	std::vector<char> bsonData;
+	switch (auto status = BZ2WDecompress(bsonData, std::span(reinterpret_cast<const char *>(saveData + 12), dataLength - 12), size))
 	{
-		std::stringstream bzStatusStr;
-		bzStatusStr << bzStatus;
-		throw ParseException(ParseException::Corrupt, "Cannot decompress: " + bzStatusStr.str());
+	case BZ2WDecompressOk: break;
+	case BZ2WDecompressNomem: throw ParseException(ParseException::Corrupt, "Cannot allocate memory");
+	default: throw ParseException(ParseException::Corrupt, String::Build("Cannot decompress: status ", int(status)));
 	}
-	dataLength = i;
 
-#ifdef DEBUG
-	std::cout << "Parsing " << dataLength << " bytes of data, version " << ver << std::endl;
-#endif
+	setSize(blockS);
+	const auto *data = reinterpret_cast<const unsigned char *>(bsonData.data());
+	dataLength = bsonData.size();
 
-	if (dataLength < bw*bh)
+	if constexpr (DEBUG)
+	{
+		std::cout << "Parsing " << dataLength << " bytes of data, version " << ver << std::endl;
+	}
+
+	if (dataLength < blockS.X*blockS.Y)
 		throw ParseException(ParseException::Corrupt, "Save data corrupt (missing data)");
 
 	// normalize coordinates
-	x0 = bx0*CELL;
-	y0 = by0*CELL;
-	w  = bw *CELL;
-	h  = bh *CELL;
+	auto partS = blockS * CELL;
+	auto partP = blockP * CELL;
 
 	if (ver<46) {
-		gravityMode = 0;
-		airMode = 0;
+		gravityMode = GRAV_VERTICAL;
+		airMode = AIR_ON;
 	}
-	m = (int *)calloc(XRES*YRES, sizeof(int));
+
+	PlaneAdapter<std::vector<int>> particleIDMap(RES, 0);
 
 	// load the required air state
-	for (y=by0; y<by0+bh; y++)
-		for (x=bx0; x<bx0+bw; x++)
+	for (auto bpos : RectSized(blockP, blockS).Range<TOP_TO_BOTTOM, LEFT_TO_RIGHT>())
+	{
+		if (data[p])
 		{
-			if (d[p])
+			//In old saves, ignore walls created by sign tool bug
+			//Not ignoring other invalid walls or invalid walls in new saves, so that any other bugs causing them are easier to notice, find and fix
+			if (ver>=44 && ver<71 && data[p]==O_WL_SIGN)
 			{
-				//In old saves, ignore walls created by sign tool bug
-				//Not ignoring other invalid walls or invalid walls in new saves, so that any other bugs causing them are easier to notice, find and fix
-				if (ver>=44 && ver<71 && d[p]==O_WL_SIGN)
-				{
-					p++;
-					continue;
-				}
-				blockMap[y][x] = d[p];
-				if (blockMap[y][x]==1)
-					blockMap[y][x]=WL_WALL;
-				else if (blockMap[y][x]==2)
-					blockMap[y][x]=WL_DESTROYALL;
-				else if (blockMap[y][x]==3)
-					blockMap[y][x]=WL_ALLOWLIQUID;
-				else if (blockMap[y][x]==4)
-					blockMap[y][x]=WL_FAN;
-				else if (blockMap[y][x]==5)
-					blockMap[y][x]=WL_STREAM;
-				else if (blockMap[y][x]==6)
-					blockMap[y][x]=WL_DETECT;
-				else if (blockMap[y][x]==7)
-					blockMap[y][x]=WL_EWALL;
-				else if (blockMap[y][x]==8)
-					blockMap[y][x]=WL_WALLELEC;
-				else if (blockMap[y][x]==9)
-					blockMap[y][x]=WL_ALLOWAIR;
-				else if (blockMap[y][x]==10)
-					blockMap[y][x]=WL_ALLOWSOLID;
-				else if (blockMap[y][x]==11)
-					blockMap[y][x]=WL_ALLOWALLELEC;
-				else if (blockMap[y][x]==12)
-					blockMap[y][x]=WL_EHOLE;
-				else if (blockMap[y][x]==13)
-					blockMap[y][x]=WL_ALLOWGAS;
-
-				if (ver>=44)
-				{
-					/* The numbers used to save walls were changed, starting in v44.
-					 * The new numbers are ignored for older versions due to some corruption of bmap in saves from older versions. 
-					 */
-					if (blockMap[y][x]==O_WL_WALLELEC)
-						blockMap[y][x]=WL_WALLELEC;
-					else if (blockMap[y][x]==O_WL_EWALL)
-						blockMap[y][x]=WL_EWALL;
-					else if (blockMap[y][x]==O_WL_DETECT)
-						blockMap[y][x]=WL_DETECT;
-					else if (blockMap[y][x]==O_WL_STREAM)
-						blockMap[y][x]=WL_STREAM;
-					else if (blockMap[y][x]==O_WL_FAN||blockMap[y][x]==O_WL_FANHELPER)
-						blockMap[y][x]=WL_FAN;
-					else if (blockMap[y][x]==O_WL_ALLOWLIQUID)
-						blockMap[y][x]=WL_ALLOWLIQUID;
-					else if (blockMap[y][x]==O_WL_DESTROYALL)
-						blockMap[y][x]=WL_DESTROYALL;
-					else if (blockMap[y][x]==O_WL_ERASE)
-						blockMap[y][x]=WL_ERASE;
-					else if (blockMap[y][x]==O_WL_WALL)
-						blockMap[y][x]=WL_WALL;
-					else if (blockMap[y][x]==O_WL_ALLOWAIR)
-						blockMap[y][x]=WL_ALLOWAIR;
-					else if (blockMap[y][x]==O_WL_ALLOWSOLID)
-						blockMap[y][x]=WL_ALLOWSOLID;
-					else if (blockMap[y][x]==O_WL_ALLOWALLELEC)
-						blockMap[y][x]=WL_ALLOWALLELEC;
-					else if (blockMap[y][x]==O_WL_EHOLE)
-						blockMap[y][x]=WL_EHOLE;
-					else if (blockMap[y][x]==O_WL_ALLOWGAS)
-						blockMap[y][x]=WL_ALLOWGAS;
-					else if (blockMap[y][x]==O_WL_GRAV)
-						blockMap[y][x]=WL_GRAV;
-					else if (blockMap[y][x]==O_WL_ALLOWENERGY)
-						blockMap[y][x]=WL_ALLOWENERGY;
-				}
-
-				if (blockMap[y][x] >= UI_WALLCOUNT)
-					blockMap[y][x] = 0;
+				p++;
+				continue;
+			}
+			auto bm = data[p];
+			switch (bm)
+			{
+			case  1: bm = WL_WALL        ; break;
+			case  2: bm = WL_DESTROYALL  ; break;
+			case  3: bm = WL_ALLOWLIQUID ; break;
+			case  4: bm = WL_FAN         ; break;
+			case  5: bm = WL_STREAM      ; break;
+			case  6: bm = WL_DETECT      ; break;
+			case  7: bm = WL_EWALL       ; break;
+			case  8: bm = WL_WALLELEC    ; break;
+			case  9: bm = WL_ALLOWAIR    ; break;
+			case 10: bm = WL_ALLOWPOWDER ; break;
+			case 11: bm = WL_ALLOWALLELEC; break;
+			case 12: bm = WL_EHOLE       ; break;
+			case 13: bm = WL_ALLOWGAS    ; break;
 			}
 
-			p++;
+			if (ver>=44)
+			{
+				/* The numbers used to save walls were changed, starting in v44.
+				 * The new numbers are ignored for older versions due to some corruption of bmap in saves from older versions.
+				 */
+				switch (bm)
+				{
+				case O_WL_WALLELEC:     bm = WL_WALLELEC    ; break;
+				case O_WL_EWALL:        bm = WL_EWALL       ; break;
+				case O_WL_DETECT:       bm = WL_DETECT      ; break;
+				case O_WL_STREAM:       bm = WL_STREAM      ; break;
+				case O_WL_FAN:
+				case O_WL_FANHELPER:    bm = WL_FAN         ; break;
+				case O_WL_ALLOWLIQUID:  bm = WL_ALLOWLIQUID ; break;
+				case O_WL_DESTROYALL:   bm = WL_DESTROYALL  ; break;
+				case O_WL_ERASE:        bm = WL_ERASE       ; break;
+				case O_WL_WALL:         bm = WL_WALL        ; break;
+				case O_WL_ALLOWAIR:     bm = WL_ALLOWAIR    ; break;
+				case O_WL_ALLOWSOLID:   bm = WL_ALLOWPOWDER ; break;
+				case O_WL_ALLOWALLELEC: bm = WL_ALLOWALLELEC; break;
+				case O_WL_EHOLE:        bm = WL_EHOLE       ; break;
+				case O_WL_ALLOWGAS:     bm = WL_ALLOWGAS    ; break;
+				case O_WL_GRAV:         bm = WL_GRAV        ; break;
+				case O_WL_ALLOWENERGY:  bm = WL_ALLOWENERGY ; break;
+				}
+			}
+
+			if (bm >= UI_WALLCOUNT)
+				bm = 0;
+			blockMap[bpos] = bm;
 		}
-	for (y=by0; y<by0+bh; y++)
-		for (x=bx0; x<bx0+bw; x++)
-			if (d[(y-by0)*bw+(x-bx0)]==4||(ver>=44 && d[(y-by0)*bw+(x-bx0)]==O_WL_FAN))
-			{
-				if (p >= dataLength)
-					throw ParseException(ParseException::Corrupt, "Not enough data at line " MTOS(__LINE__) " in " MTOS(__FILE__));
-				fanVelX[y][x] = (d[p++]-127.0f)/64.0f;
-			}
-	for (y=by0; y<by0+bh; y++)
-		for (x=bx0; x<bx0+bw; x++)
-			if (d[(y-by0)*bw+(x-bx0)]==4||(ver>=44 && d[(y-by0)*bw+(x-bx0)]==O_WL_FAN))
-			{
-				if (p >= dataLength)
-					throw ParseException(ParseException::Corrupt, "Not enough data at line " MTOS(__LINE__) " in " MTOS(__FILE__));
-				fanVelY[y][x] = (d[p++]-127.0f)/64.0f;
-			}
 
-	// load the particle map
-	i = 0;
-	k = 0;
-	pty = p;
-	for (y=y0; y<y0+h; y++)
-		for (x=x0; x<x0+w; x++)
+		p++;
+	}
+	for (auto bpos : RectSized(blockP, blockS).Range<TOP_TO_BOTTOM, LEFT_TO_RIGHT>())
+	{
+		auto dataPlane = PlaneAdapter<PlaneBase<const unsigned char>>(blockS, std::in_place, data);
+		if (dataPlane[bpos - blockP]==4||(ver>=44 && dataPlane[bpos - blockP]==O_WL_FAN))
 		{
 			if (p >= dataLength)
 				throw ParseException(ParseException::Corrupt, "Not enough data at line " MTOS(__LINE__) " in " MTOS(__FILE__));
-			j=d[p++];
-			if (j >= PT_NUM) {
-				//TODO: Possibly some server side translation
+			fanVelX[bpos] = (data[p++]-127.0f)/64.0f;
+		}
+	}
+	for (auto bpos : RectSized(blockP, blockS).Range<TOP_TO_BOTTOM, LEFT_TO_RIGHT>())
+	{
+		auto dataPlane = PlaneAdapter<PlaneBase<const unsigned char>>(blockS, std::in_place, data);
+		if (dataPlane[bpos - blockP]==4||(ver>=44 && dataPlane[bpos - blockP]==O_WL_FAN))
+		{
+			if (p >= dataLength)
+				throw ParseException(ParseException::Corrupt, "Not enough data at line " MTOS(__LINE__) " in " MTOS(__FILE__));
+			fanVelY[bpos] = (data[p++]-127.0f)/64.0f;
+		}
+	}
+
+	// load the particle map
+	{
+		auto k = 0;
+		pty = p;
+		for (auto pos : RectSized(partP, partS).Range<TOP_TO_BOTTOM, LEFT_TO_RIGHT>())
+		{
+			if (p >= dataLength)
+				throw ParseException(ParseException::Corrupt, "Not enough data at line " MTOS(__LINE__) " in " MTOS(__FILE__));
+			auto j=data[p++];
+			if (int(j) >= PT_NUM) { // not possible these days since PMAPBITS >= 8
 				j = PT_DUST;//throw ParseException(ParseException::Corrupt, "Not enough data at line " MTOS(__LINE__) " in " MTOS(__FILE__));
 			}
 			if (j)
 			{
-				memset(particles+k, 0, sizeof(Particle));
+				memset(&particles[k], 0, sizeof(Particle));
 				particles[k].type = j;
 				if (j == PT_COAL)
 					particles[k].tmp = 50;
@@ -1415,17 +1495,18 @@ void GameSave::readPSv(char * data, int dataLength)
 					particles[k].ctype = 0;
 				if (j==PT_BIZR || j==PT_BIZRG || j==PT_BIZRS)
 					particles[k].ctype = 0x47FFFF;
-				particles[k].x = (float)x;
-				particles[k].y = (float)y;
-				m[(x-x0)+(y-y0)*w] = k+1;
+				particles[k].x = (float)pos.X;
+				particles[k].y = (float)pos.Y;
+				particleIDMap[pos - partP] = k+1;
 				particlesCount = ++k;
 			}
 		}
+	}
 
 	// load particle properties
-	for (j=0; j<w*h; j++)
+	for (auto pos : partS.OriginRect().Range<TOP_TO_BOTTOM, LEFT_TO_RIGHT>())
 	{
-		i = m[j];
+		auto i = particleIDMap[pos];
 		if (i)
 		{
 			i--;
@@ -1433,16 +1514,16 @@ void GameSave::readPSv(char * data, int dataLength)
 				throw ParseException(ParseException::Corrupt, "Not enough data at line " MTOS(__LINE__) " in " MTOS(__FILE__));
 			if (i < NPART)
 			{
-				particles[i].vx = (d[p++]-127.0f)/16.0f;
-				particles[i].vy = (d[p++]-127.0f)/16.0f;
+				particles[i].vx = (data[p++]-127.0f)/16.0f;
+				particles[i].vy = (data[p++]-127.0f)/16.0f;
 			}
 			else
 				p += 2;
 		}
 	}
-	for (j=0; j<w*h; j++)
+	for (auto pos : partS.OriginRect().Range<TOP_TO_BOTTOM, LEFT_TO_RIGHT>())
 	{
-		i = m[j];
+		auto i = particleIDMap[pos];
 		if (i)
 		{
 			if (ver>=44) {
@@ -1450,8 +1531,8 @@ void GameSave::readPSv(char * data, int dataLength)
 					throw ParseException(ParseException::Corrupt, "Not enough data at line " MTOS(__LINE__) " in " MTOS(__FILE__));
 				}
 				if (i <= NPART) {
-					ttv = (d[p++])<<8;
-					ttv |= (d[p++]);
+					ttv = (data[p++])<<8;
+					ttv |= (data[p++]);
 					particles[i-1].life = ttv;
 				} else {
 					p+=2;
@@ -1460,29 +1541,29 @@ void GameSave::readPSv(char * data, int dataLength)
 				if (p >= dataLength)
 					throw ParseException(ParseException::Corrupt, "Not enough data at line " MTOS(__LINE__) " in " MTOS(__FILE__));
 				if (i <= NPART)
-					particles[i-1].life = d[p++]*4;
+					particles[i-1].life = data[p++]*4;
 				else
 					p++;
 			}
 		}
 	}
 	if (ver>=44) {
-		for (j=0; j<w*h; j++)
+		for (auto pos : partS.OriginRect().Range<TOP_TO_BOTTOM, LEFT_TO_RIGHT>())
 		{
-			i = m[j];
+			auto i = particleIDMap[pos];
 			if (i)
 			{
 				if (p >= dataLength) {
 					throw ParseException(ParseException::Corrupt, "Not enough data at line " MTOS(__LINE__) " in " MTOS(__FILE__));
 				}
 				if (i <= NPART) {
-					ttv = (d[p++])<<8;
-					ttv |= (d[p++]);
+					ttv = (data[p++])<<8;
+					ttv |= (data[p++]);
 					particles[i-1].tmp = ttv;
 					if (ver<53 && !particles[i-1].tmp)
-						for (q = 1; q<=NGOL; q++) {
-							if (particles[i-1].type==goltype[q-1] && grule[q][9]==2)
-								particles[i-1].tmp = grule[q][9]-1;
+						for (q = 0; q < NGOL; q++) {
+							if (particles[i-1].type==builtinGol[q].oldtype && (builtinGol[q].ruleset >> 17)==0)
+								particles[i-1].tmp = (builtinGol[q].ruleset >> 17)+1;
 						}
 					if (ver>=51 && ver<53 && particles[i-1].type==PT_PBCN)
 					{
@@ -1495,26 +1576,27 @@ void GameSave::readPSv(char * data, int dataLength)
 			}
 		}
 	}
+	auto dataPlanePty = PlaneAdapter<PlaneBase<const unsigned char>>(partS, std::in_place, data + pty);
 	if (ver>=53) {
-		for (j=0; j<w*h; j++)
+		for (auto pos : partS.OriginRect().Range<TOP_TO_BOTTOM, LEFT_TO_RIGHT>())
 		{
-			i = m[j];
-			ty = d[pty+j];
+			auto i = particleIDMap[pos];
+			ty = dataPlanePty[pos];
 			if (i && (ty==PT_PBCN || (ty==PT_TRON && ver>=77)))
 			{
 				if (p >= dataLength)
 					throw ParseException(ParseException::Corrupt, "Not enough data at line " MTOS(__LINE__) " in " MTOS(__FILE__));
 				if (i <= NPART)
-					particles[i-1].tmp2 = d[p++];
+					particles[i-1].tmp2 = data[p++];
 				else
 					p++;
 			}
 		}
 	}
 	//Read ALPHA component
-	for (j=0; j<w*h; j++)
+	for (auto pos : partS.OriginRect().Range<TOP_TO_BOTTOM, LEFT_TO_RIGHT>())
 	{
-		i = m[j];
+		auto i = particleIDMap[pos];
 		if (i)
 		{
 			if (ver>=49) {
@@ -1522,7 +1604,7 @@ void GameSave::readPSv(char * data, int dataLength)
 					throw ParseException(ParseException::Corrupt, "Not enough data at line " MTOS(__LINE__) " in " MTOS(__FILE__));
 				}
 				if (i <= NPART) {
-					particles[i-1].dcolour = d[p++]<<24;
+					particles[i-1].dcolour = data[p++]<<24;
 				} else {
 					p++;
 				}
@@ -1530,9 +1612,9 @@ void GameSave::readPSv(char * data, int dataLength)
 		}
 	}
 	//Read RED component
-	for (j=0; j<w*h; j++)
+	for (auto pos : partS.OriginRect().Range<TOP_TO_BOTTOM, LEFT_TO_RIGHT>())
 	{
-		i = m[j];
+		auto i = particleIDMap[pos];
 		if (i)
 		{
 			if (ver>=49) {
@@ -1540,7 +1622,7 @@ void GameSave::readPSv(char * data, int dataLength)
 					throw ParseException(ParseException::Corrupt, "Not enough data at line " MTOS(__LINE__) " in " MTOS(__FILE__));
 				}
 				if (i <= NPART) {
-					particles[i-1].dcolour |= d[p++]<<16;
+					particles[i-1].dcolour |= data[p++]<<16;
 				} else {
 					p++;
 				}
@@ -1548,9 +1630,9 @@ void GameSave::readPSv(char * data, int dataLength)
 		}
 	}
 	//Read GREEN component
-	for (j=0; j<w*h; j++)
+	for (auto pos : partS.OriginRect().Range<TOP_TO_BOTTOM, LEFT_TO_RIGHT>())
 	{
-		i = m[j];
+		auto i = particleIDMap[pos];
 		if (i)
 		{
 			if (ver>=49) {
@@ -1558,7 +1640,7 @@ void GameSave::readPSv(char * data, int dataLength)
 					throw ParseException(ParseException::Corrupt, "Not enough data at line " MTOS(__LINE__) " in " MTOS(__FILE__));
 				}
 				if (i <= NPART) {
-					particles[i-1].dcolour |= d[p++]<<8;
+					particles[i-1].dcolour |= data[p++]<<8;
 				} else {
 					p++;
 				}
@@ -1566,9 +1648,9 @@ void GameSave::readPSv(char * data, int dataLength)
 		}
 	}
 	//Read BLUE component
-	for (j=0; j<w*h; j++)
+	for (auto pos : partS.OriginRect().Range<TOP_TO_BOTTOM, LEFT_TO_RIGHT>())
 	{
-		i = m[j];
+		auto i = particleIDMap[pos];
 		if (i)
 		{
 			if (ver>=49) {
@@ -1576,17 +1658,17 @@ void GameSave::readPSv(char * data, int dataLength)
 					throw ParseException(ParseException::Corrupt, "Not enough data at line " MTOS(__LINE__) " in " MTOS(__FILE__));
 				}
 				if (i <= NPART) {
-					particles[i-1].dcolour |= d[p++];
+					particles[i-1].dcolour |= data[p++];
 				} else {
 					p++;
 				}
 			}
 		}
 	}
-	for (j=0; j<w*h; j++)
+	for (auto pos : partS.OriginRect().Range<TOP_TO_BOTTOM, LEFT_TO_RIGHT>())
 	{
-		i = m[j];
-		ty = d[pty+j];
+		auto i = particleIDMap[pos];
+		ty = dataPlanePty[pos];
 		if (i)
 		{
 			if (ver>=34&&legacy_beta==0)
@@ -1599,18 +1681,18 @@ void GameSave::readPSv(char * data, int dataLength)
 				{
 					if (ver>=42) {
 						if (new_format) {
-							ttv = (d[p++])<<8;
-							ttv |= (d[p++]);
+							ttv = (data[p++])<<8;
+							ttv |= (data[p++]);
 							if (particles[i-1].type==PT_PUMP) {
 								particles[i-1].temp = ttv + 0.15;//fix PUMP saved at 0, so that it loads at 0.
 							} else {
-								particles[i-1].temp = ttv;
+								particles[i-1].temp = float(ttv);
 							}
 						} else {
-							particles[i-1].temp = (d[p++]*((MAX_TEMP+(-MIN_TEMP))/255))+MIN_TEMP;
+							particles[i-1].temp = float((data[p++]*((MAX_TEMP+(-MIN_TEMP))/255))+MIN_TEMP);
 						}
 					} else {
-						particles[i-1].temp = ((d[p++]*((O_MAX_TEMP+(-O_MIN_TEMP))/255))+O_MIN_TEMP)+273;
+						particles[i-1].temp = float(((data[p++]*((O_MAX_TEMP+(-O_MIN_TEMP))/255))+O_MIN_TEMP)+273);
 					}
 				}
 				else
@@ -1623,25 +1705,24 @@ void GameSave::readPSv(char * data, int dataLength)
 			}
 			else
 			{
-				particles[i-1].temp = elements[particles[i-1].type].Temperature;
+				particles[i-1].temp = builtinElements[particles[i-1].type].DefaultProperties.temp;
 			}
 		}
 	}
-	for (j=0; j<w*h; j++)
+	for (auto pos : partS.OriginRect().Range<TOP_TO_BOTTOM, LEFT_TO_RIGHT>())
 	{
+		auto i = particleIDMap[pos];
 		int gnum = 0;
-		i = m[j];
-		ty = d[pty+j];
+		ty = dataPlanePty[pos];
 		if (i && (ty==PT_CLNE || (ty==PT_PCLN && ver>=43) || (ty==PT_BCLN && ver>=44) || (ty==PT_SPRK && ver>=21) || (ty==PT_LAVA && ver>=34) || (ty==PT_PIPE && ver>=43) || (ty==PT_LIFE && ver>=51) || (ty==PT_PBCN && ver>=52) || (ty==PT_WIRE && ver>=55) || (ty==PT_STOR && ver>=59) || (ty==PT_CONV && ver>=60)))
 		{
 			if (p >= dataLength)
 				throw ParseException(ParseException::Corrupt, "Not enough data at line " MTOS(__LINE__) " in " MTOS(__FILE__));
 			if (i <= NPART)
-				particles[i-1].ctype = d[p++];
+				particles[i-1].ctype = data[p++];
 			else
 				p++;
 		}
-		//TODO: STKM_init_legs
 		// no more particle properties to load, so we can change type here without messing up loading
 		if (i && i<=NPART)
 		{
@@ -1658,8 +1739,6 @@ void GameSave::readPSv(char * data, int dataLength)
 			if (ver<48 && (ty==OLD_PT_WIND || (ty==PT_BRAY&&particles[i-1].life==0)))
 			{
 				// Replace invisible particles with something sensible and add decoration to hide it
-				x = (int)(particles[i-1].x+0.5f);
-				y = (int)(particles[i-1].y+0.5f);
 				particles[i-1].dcolour = 0xFF000000;
 				particles[i-1].type = PT_DMND;
 			}
@@ -1667,7 +1746,7 @@ void GameSave::readPSv(char * data, int dataLength)
 				//Replace old GOL
 				particles[i-1].type = PT_LIFE;
 				for (gnum = 0; gnum<NGOL; gnum++){
-					if (ty==goltype[gnum])
+					if (ty==builtinGol[gnum].oldtype)
 						particles[i-1].ctype = gnum;
 				}
 				ty = PT_LIFE;
@@ -1675,11 +1754,22 @@ void GameSave::readPSv(char * data, int dataLength)
 			if(ver<52 && (ty==PT_CLNE || ty==PT_PCLN || ty==PT_BCLN)){
 				//Replace old GOL ctypes in clone
 				for (gnum = 0; gnum<NGOL; gnum++){
-					if (particles[i-1].ctype==goltype[gnum])
+					if (particles[i-1].ctype==builtinGol[gnum].oldtype)
 					{
 						particles[i-1].ctype = PT_LIFE;
 						particles[i-1].tmp = gnum;
 					}
+				}
+			}
+			if (particles[i-1].type == PT_LIFE)
+			{
+				particles[i-1].tmp2 = particles[i-1].tmp;
+				particles[i-1].tmp = 0;
+				if (particles[i-1].ctype >= 0 && particles[i-1].ctype < NGOL)
+				{
+					if (!particles[i-1].dcolour)
+						particles[i-1].dcolour = builtinGol[particles[i-1].ctype].colour.Pack();
+					particles[i-1].tmp = builtinGol[particles[i-1].ctype].colour2.Pack();
 				}
 			}
 			if(ty==PT_LCRY){
@@ -1726,15 +1816,11 @@ void GameSave::readPSv(char * data, int dataLength)
 				}
 				if (particles[i-1].type==PT_FIRW && particles[i-1].tmp>=2)
 				{
-					int caddress = restrict_flt(restrict_flt((float)(particles[i-1].tmp-4), 0.0f, 200.0f)*3, 0.0f, (200.0f*3)-3);
 					particles[i-1].type = PT_EMBR;
+					particles[i-1].ctype = Renderer::firwTableAt(particles[i-1].tmp-4).Pack();
 					particles[i-1].tmp = 1;
-					particles[i-1].ctype = (((firw_data[caddress]))<<16) | (((firw_data[caddress+1]))<<8) | ((firw_data[caddress+2]));
 				}
 			}
-			if (ver < 88) //fix air blowing stickmen
-				if ((particles[i-1].type == PT_STKM || particles[i-1].type == PT_STKM2 || particles[i-1].type == PT_FIGH) && particles[i-1].ctype == OLD_SPC_AIR)
-					particles[i-1].ctype = SPC_AIR;
 			if (ver < 89)
 			{
 				if (particles[i-1].type == PT_FILT)
@@ -1762,38 +1848,66 @@ void GameSave::readPSv(char * data, int dataLength)
 						particles[i-1].tmp = 0;
 					}
 				}
-
-				if (particles[i-1].type == PT_WIFI)
-					particles[i-1].flags |= FLAG_COMPAT;
+			}
+			if (ver < 93)
+			{
+				if (particles[i-1].type == PT_PIPE || particles[i-1].type == PT_PPIP)
+				{
+					if (particles[i-1].ctype == 1)
+						particles[i-1].tmp |= 0x00020000; //PFLAG_INITIALIZING
+					particles[i-1].tmp |= (particles[i-1].ctype-1)<<18;
+					particles[i-1].ctype = particles[i-1].tmp&0xFF;
+				}
+				else if (particles[i-1].type == PT_HSWC || particles[i-1].type == PT_PUMP)
+				{
+					particles[i-1].tmp = 0;
+				}
 			}
 		}
 	}
 
-	if (p >= dataLength)
-		goto version1;
-	j = d[p++];
-	for (i=0; i<j; i++)
+	if (p == dataLength) // no sign data, "version 1" PSv
+		return;
+
+	auto signCount = data[p++];
+	for (auto i = 0; i < signCount; i++)
 	{
 		if (p+6 > dataLength)
 			throw ParseException(ParseException::Corrupt, "Not enough data at line " MTOS(__LINE__) " in " MTOS(__FILE__));
-		x = d[p++];
-		x |= ((unsigned)d[p++])<<8;
-		tempSign.x = x+x0;
-		x = d[p++];
-		x |= ((unsigned)d[p++])<<8;
-		tempSign.y = x+y0;
-		x = d[p++];
-		tempSign.ju = (sign::Justification)x;
-		x = d[p++];
-		if (p+x > dataLength)
-			throw ParseException(ParseException::Corrupt, "Not enough data at line " MTOS(__LINE__) " in " MTOS(__FILE__));
-		if(x>254)
-			x = 254;
-		memcpy(tempSignText, d+p, x);
-		tempSignText[x] = 0;
-		tempSign.text = format::CleanString(tempSignText, true, true, true).substr(0, 45);
+		{
+			int x = data[p++];
+			x |= ((unsigned)data[p++])<<8;
+			tempSign.x = x+partP.X;
+		}
+		{
+			int y = data[p++];
+			y |= ((unsigned)data[p++])<<8;
+			tempSign.y = y+partP.Y;
+		}
+		{
+			int ju = data[p++];
+			tempSign.ju = (sign::Justification)ju;
+		}
+		{
+			int l = data[p++];
+			if (p+l > dataLength)
+				throw ParseException(ParseException::Corrupt, "Not enough data at line " MTOS(__LINE__) " in " MTOS(__FILE__));
+			if(l>254)
+				l = 254;
+			memcpy(tempSignText, &data[p], l);
+			tempSignText[l] = 0;
+			p += l;
+		}
+		tempSign.text = format::CleanString(ByteString(tempSignText).FromUtf8(), true, true, true).Substr(0, 45);
+		if (tempSign.text == "{t}")
+		{
+			tempSign.text = "Temp: {t}";
+		}
+		else if (tempSign.text == "{p}")
+		{
+			tempSign.text = "Pressure: {p}";
+		}
 		tempSigns.push_back(tempSign);
-		p += x;
 	}
 
 	for (size_t i = 0; i < tempSigns.size(); i++)
@@ -1802,119 +1916,118 @@ void GameSave::readPSv(char * data, int dataLength)
 			break;
 		signs.push_back(tempSigns[i]);
 	}
-
-	}
-	catch(ParseException & e)
-	{
-		if (m)
-		{
-			free(m);
-			m = 0;
-		}
-		if (d)
-		{
-			free(d);
-			d = 0;
-		}
-		if (fp)
-		{
-			free(fp);
-			fp = 0;
-		}
-		throw;
-	}
-
-	version1:
-	if (m)
-	{
-		free(m);
-		m = 0;
-	}
-	if (d)
-	{
-		free(d);
-		d = 0;
-	}
-	if (fp)
-	{
-		free(fp);
-		fp = 0;
-	}
 }
+#undef MTOS
+#undef MTOS_EXPAND
 
-// restrict the minimum version this save can be opened with
-#define RESTRICTVERSION(major, minor) if ((major) > minimumMajorVersion || (((major) == minimumMajorVersion && (minor) > minimumMinorVersion))) {\
-	minimumMajorVersion = major;\
-	minimumMinorVersion = minor;\
-}
-
-char * GameSave::serialiseOPS(unsigned int & dataLength)
+std::pair<bool, std::vector<char>> GameSave::serialiseOPS() const
 {
-	//Particle *particles = sim->parts;
-	unsigned char *partsData = NULL, *partsPosData = NULL, *fanData = NULL, *wallData = NULL, *finalData = NULL, *outputData = NULL, *soapLinkData = NULL;
-	unsigned *partsPosLink = NULL, *partsPosFirstMap = NULL, *partsPosCount = NULL, *partsPosLastMap = NULL;
-	unsigned partsCount = 0, *partsSaveIndex = NULL;
-	unsigned *elementCount = new unsigned[PT_NUM];
-	unsigned int partsDataLen, partsPosDataLen, fanDataLen, wallDataLen, finalDataLen, outputDataLen, soapLinkDataLen;
-	int blockX, blockY, blockW, blockH, fullX, fullY, fullW, fullH;
-	int x, y, i, wallDataFound = 0;
-	int posCount, signsCount;
+	if (blockSize.X > 255 || blockSize.Y > 255)
+	{
+		throw BuildException("simulation size not supported by the save format");
+	}
+
 	// minimum version this save is compatible with
 	// when building, this number may be increased depending on what elements are used
 	// or what properties are detected
-	int minimumMajorVersion = 90, minimumMinorVersion = 2;
-	bson b;
-
-	std::fill(elementCount, elementCount+PT_NUM, 0);
+	auto minimumVersion = Version(90, 2);
+	auto RESTRICTVERSION = [&minimumVersion](auto major, auto minor = 0) {
+		// restrict the minimum version this save can be opened with
+		auto version = Version(major, minor);
+		if (minimumVersion < version)
+		{
+			minimumVersion = version;
+		}
+	};
 
 	//Get coords in blocks
-	blockX = 0;//orig_x0/CELL;
-	blockY = 0;//orig_y0/CELL;
+	auto blockP = Vec2{ 0, 0 };
 
 	//Snap full coords to block size
-	fullX = blockX*CELL;
-	fullY = blockY*CELL;
+	auto partP = blockP * CELL;
 
 	//Original size + offset of original corner from snapped corner, rounded up by adding CELL-1
-	blockW = blockWidth;//(blockWidth-fullX+CELL-1)/CELL;
-	blockH = blockHeight;//(blockHeight-fullY+CELL-1)/CELL;
-	fullW = blockW*CELL;
-	fullH = blockH*CELL;
+	auto blockS = blockSize;
+	auto partS = blockS * CELL;
 
-	//Copy fan and wall data
-	wallData = (unsigned char*)malloc(blockW*blockH);
-	wallDataLen = blockW*blockH;
-	fanData = (unsigned char*)malloc((blockW*blockH)*2);
-	fanDataLen = 0;
-	for(x = blockX; x < blockX+blockW; x++)
+	// Copy fan and wall data
+	std::vector<unsigned char> wallDataBacking(blockSize.X*blockSize.Y);
+	PlaneAdapter<PlaneBase<unsigned char>> wallData(blockSize, std::in_place, wallDataBacking.data());
+	bool hasWallData = false;
+	std::vector<unsigned char> fanData(blockSize.X*blockSize.Y*2);
+	std::vector<unsigned char> pressData(blockSize.X*blockSize.Y*2);
+	std::vector<unsigned char> vxData(blockSize.X*blockSize.Y*2);
+	std::vector<unsigned char> vyData(blockSize.X*blockSize.Y*2);
+	std::vector<unsigned char> ambientData(blockSize.X*blockSize.Y*2, 0);
+
+	std::vector<unsigned char> blockAirData(blockSize.X * blockSize.Y * 2);
+	PlaneAdapter<PlaneBase<unsigned char>> blockAirDataPlane (blockSize, std::in_place, blockAirData.data()                            );
+	PlaneAdapter<PlaneBase<unsigned char>> blockAirhDataPlane(blockSize, std::in_place, blockAirData.data() + blockSize.X * blockSize.Y);
+
+	std::vector<unsigned char> gravityData(blockSize.X * blockSize.Y * 4 * sizeof(float));
+	PlaneAdapter<PlaneBase<float   >> massDataPlane  (blockSize, std::in_place, reinterpret_cast<float    *>(gravityData.data()                                                ));
+	PlaneAdapter<PlaneBase<uint32_t>> maskDataPlane  (blockSize, std::in_place, reinterpret_cast<uint32_t *>(gravityData.data() +     blockSize.X * blockSize.Y * sizeof(float)));
+	PlaneAdapter<PlaneBase<float   >> forceXDataPlane(blockSize, std::in_place, reinterpret_cast<float    *>(gravityData.data() + 2 * blockSize.X * blockSize.Y * sizeof(float)));
+	PlaneAdapter<PlaneBase<float   >> forceYDataPlane(blockSize, std::in_place, reinterpret_cast<float    *>(gravityData.data() + 3 * blockSize.X * blockSize.Y * sizeof(float)));
+
+	unsigned int fanDataLen = 0, pressDataLen = 0, vxDataLen = 0, vyDataLen = 0, ambientDataLen = 0;
+
+	for (auto bpos : RectSized(blockP, blockS).Range<LEFT_TO_RIGHT, TOP_TO_BOTTOM>())
 	{
-		for(y = blockY; y < blockY+blockH; y++)
+		wallData[bpos - blockP] = blockMap[bpos];
+		if (blockMap[bpos])
+			hasWallData = true;
+
+		if (hasPressure)
 		{
-			wallData[(y-blockY)*blockW+(x-blockX)] = blockMap[y][x];
-			if(blockMap[y][x] && !wallDataFound)
-				wallDataFound = 1;
-			if(blockMap[y][x]==WL_FAN)
+			//save pressure and x/y velocity grids
+			float pres = std::max(-255.0f,std::min(255.0f,pressure[bpos]))+256.0f;
+			float velX = std::max(-255.0f,std::min(255.0f,velocityX[bpos]))+256.0f;
+			float velY = std::max(-255.0f,std::min(255.0f,velocityY[bpos]))+256.0f;
+			pressData[pressDataLen++] = (unsigned char)((int)(pres*128)&0xFF);
+			pressData[pressDataLen++] = (unsigned char)((int)(pres*128)>>8);
+
+			vxData[vxDataLen++] = (unsigned char)((int)(velX*128)&0xFF);
+			vxData[vxDataLen++] = (unsigned char)((int)(velX*128)>>8);
+
+			vyData[vyDataLen++] = (unsigned char)((int)(velY*128)&0xFF);
+			vyData[vyDataLen++] = (unsigned char)((int)(velY*128)>>8);
+
+			blockAirDataPlane [bpos - blockP] = blockAir [bpos];
+			blockAirhDataPlane[bpos - blockP] = blockAirh[bpos];
+
+			massDataPlane  [bpos - blockP] = gravMass  [bpos];
+			maskDataPlane  [bpos - blockP] = gravMask  [bpos];
+			forceXDataPlane[bpos - blockP] = gravForceX[bpos];
+			forceYDataPlane[bpos - blockP] = gravForceY[bpos];
+		}
+
+		if (hasAmbientHeat)
+		{
+			int tempTemp = (int)(ambientHeat[bpos]+0.5f);
+			ambientData[ambientDataLen++] = tempTemp;
+			ambientData[ambientDataLen++] = tempTemp >> 8;
+		}
+
+		if (blockMap[bpos] == WL_FAN)
+		{
 			{
-				i = (int)(fanVelX[y][x]*64.0f+127.5f);
+				auto i = (int)(fanVelX[bpos]*64.0f+127.5f);
 				if (i<0) i=0;
 				if (i>255) i=255;
 				fanData[fanDataLen++] = i;
-				i = (int)(fanVelY[y][x]*64.0f+127.5f);
+			}
+			{
+				auto i = (int)(fanVelY[bpos]*64.0f+127.5f);
 				if (i<0) i=0;
 				if (i>255) i=255;
 				fanData[fanDataLen++] = i;
 			}
 		}
-	}
-	if(!fanDataLen)
-	{
-		free(fanData);
-		fanData = NULL;
-	}
-	if(!wallDataFound)
-	{
-		free(wallData);
-		wallData = NULL;
+		else if (blockMap[bpos] == WL_STASIS)
+		{
+			RESTRICTVERSION(94, 0);
+		}
 	}
 
 	//Index positions of all particles, using linked lists
@@ -1922,222 +2035,382 @@ char * GameSave::serialiseOPS(unsigned int & dataLength)
 	//partsPosLastMap is pmap for the last particle in each position
 	//partsPosCount is the number of particles in each position
 	//partsPosLink contains, for each particle, (i<<8)|1 of the next particle in the same position
-	partsPosFirstMap = (unsigned int *)calloc(fullW*fullH, sizeof(unsigned));
-	partsPosLastMap = (unsigned int *)calloc(fullW*fullH, sizeof(unsigned));
-	partsPosCount = (unsigned int *)calloc(fullW*fullH, sizeof(unsigned));
-	partsPosLink = (unsigned int *)calloc(NPART, sizeof(unsigned));
-	for(i = 0; i < particlesCount; i++)
+	PlaneAdapter<std::vector<unsigned>> partsPosFirstMap(partS, 0);
+	PlaneAdapter<std::vector<unsigned>> partsPosLastMap(partS, 0);
+	PlaneAdapter<std::vector<unsigned>> partsPosCount(partS, 0);
+	std::vector<unsigned> partsPosLink(NPART, 0);
+	unsigned int soapCount = 0;
+	for(auto i = 0; i < particlesCount; i++)
 	{
 		if(particles[i].type)
 		{
-			x = (int)(particles[i].x+0.5f);
-			y = (int)(particles[i].y+0.5f);
+			auto pos = Vec2{ (int)(particles[i].x+0.5f), (int)(particles[i].y+0.5f) };
 			//Coordinates relative to top left corner of saved area
-			x -= fullX;
-			y -= fullY;
-			if (!partsPosFirstMap[y*fullW + x])
+			if (!partsPosFirstMap[pos - partP])
 			{
 				//First entry in list
-				partsPosFirstMap[y*fullW + x] = (i<<8)|1;
-				partsPosLastMap[y*fullW + x] = (i<<8)|1;
+				partsPosFirstMap[pos - partP] = (i<<8)|1;
+				partsPosLastMap[pos - partP] = (i<<8)|1;
 			}
 			else
 			{
 				//Add to end of list
-				partsPosLink[partsPosLastMap[y*fullW + x]>>8] = (i<<8)|1;//link to current end of list
-				partsPosLastMap[y*fullW + x] = (i<<8)|1;//set as new end of list
+				partsPosLink[partsPosLastMap[pos - partP]>>8] = (i<<8)|1;//link to current end of list
+				partsPosLastMap[pos - partP] = (i<<8)|1;//set as new end of list
 			}
-			partsPosCount[y*fullW + x]++;
+			partsPosCount[pos - partP]++;
 		}
 	}
 
 	//Store number of particles in each position
-	partsPosData = (unsigned char*)malloc(fullW*fullH*3);
-	partsPosDataLen = 0;
-	for (y=0;y<fullH;y++)
+	std::vector<unsigned char> partsPosData(partS.X * partS.Y * 3);
+	unsigned int partsPosDataLen = 0;
+	for (auto pos : partS.OriginRect().Range<TOP_TO_BOTTOM, LEFT_TO_RIGHT>())
 	{
-		for (x=0;x<fullW;x++)
-		{
-			posCount = partsPosCount[y*fullW + x];
-			partsPosData[partsPosDataLen++] = (posCount&0x00FF0000)>>16;
-			partsPosData[partsPosDataLen++] = (posCount&0x0000FF00)>>8;
-			partsPosData[partsPosDataLen++] = (posCount&0x000000FF);
-		}
+		unsigned int posCount = partsPosCount[pos];
+		partsPosData[partsPosDataLen++] = (posCount&0x00FF0000)>>16;
+		partsPosData[partsPosDataLen++] = (posCount&0x0000FF00)>>8;
+		partsPosData[partsPosDataLen++] = (posCount&0x000000FF);
 	}
 
 	//Copy parts data
-	/* Field descriptor format:
-	 |		0		|		0		|		0		|		0		|		0		|		0		|		0		|		0		|		0		|		0		|		0		|		0		|		0		|		0		|		0		|		0		|
-									|	   pavg		|	 tmp[3+4]	|	tmp2[2]		|		tmp2	|	ctype[2]	|		vy		|		vx		|	dcololour	|	ctype[1]	|		tmp[2]	|		tmp[1]	|		life[2]	|		life[1]	|	temp dbl len|
+	/* Field descriptor [1+2] format:
+	 |      15      |      14       |      13       |      12       |      11       |      10       |       9       |       8       |       7       |       6       |       5       |       4       |       3       |       2       |       1       |       0       |
+	 |  fieldDesc3  |    type[2]    |  tmp3/4[1+2]  |   tmp[3+4]    |   tmp2[2]     |     tmp2      |   ctype[2]    |      vy       |      vx       |  decorations  |   ctype[1]    |    tmp[2]     |    tmp[1]     |    life[2]    |    life[1]    | temp dbl len  |
 	 life[2] means a second byte (for a 16 bit field) if life[1] is present
+	 fieldDesc3 means Field descriptor [3] exists
+	   Field descriptor [3] format:
+	 |      23      |      22       |      21       |      20       |      19       |      18       |      17       |      16       |
+	 |   RESERVED   |     FREE      |     FREE      |     FREE      |     FREE      |     FREE      |     FREE      |  tmp3/4[3+4]  |
+	 last bit is reserved. If necessary, use it to signify that fieldDescriptor will have another byte
+	 That way, if we ever need a 25th bit, we won't have to change the save format
 	 */
-	partsData = (unsigned char *)malloc(NPART * (sizeof(Particle)+1));
-	partsDataLen = 0;
-	partsSaveIndex = (unsigned int *)calloc(NPART, sizeof(unsigned));
-	partsCount = 0;
-	for (y=0;y<fullH;y++)
+
+	auto &builtinElements = GetElements();
+	auto &possiblyCarriesType = Particle::PossiblyCarriesType();
+	auto &properties = Particle::GetProperties();
+	// Allocate enough space to store all Particles and 3 bytes on top of that per Particle, for the field descriptors.
+	// In practice, a Particle will never need as much space in the save as in memory; this is just an upper bound to simplify allocation.
+	std::vector<unsigned char> partsData(NPART * (sizeof(Particle)+3));
+	unsigned int partsDataLen = 0;
+	std::vector<unsigned> partsSaveIndex(NPART);
+	unsigned int partsCount = 0;
+	std::fill(partsSaveIndex.data(), partsSaveIndex.data() + NPART, 0);
+	auto &sd = SimulationData::CRef();
+	auto &elements = sd.elements;
+	std::set<int> paletteSet;
+	for (auto pos : partS.OriginRect().Range<TOP_TO_BOTTOM, LEFT_TO_RIGHT>())
 	{
-		for (x=0;x<fullW;x++)
+		//Find the first particle in this position
+		auto i = partsPosFirstMap[pos];
+
+		//Loop while there is a pmap entry
+		while (i)
 		{
-			//Find the first particle in this position
-			i = partsPosFirstMap[y*fullW + x];
+			unsigned int fieldDesc = 0;
+			int tempTemp, vTemp;
 
-			//Loop while there is a pmap entry
-			while (i)
+			//Turn pmap entry into a particles index
+			i = i>>8;
+
+			//Store saved particle index+1 for this partsptr index (0 means not saved)
+			partsSaveIndex[i] = (partsCount++) + 1;
+
+			auto part = particles[i];
+			paletteSet.insert(part.type);
+			for (auto index : possiblyCarriesType)
 			{
-				unsigned short fieldDesc = 0;
-				int fieldDescLoc = 0, tempTemp, vTemp;
-
-				//Turn pmap entry into a particles index
-				i = i>>8;
-
-				//Store saved particle index+1 for this partsptr index (0 means not saved)
-				partsSaveIndex[i] = (partsCount++) + 1;
-
-				//Type (required)
-				partsData[partsDataLen++] = particles[i].type;
-				elementCount[particles[i].type]++;
-
-				//Location of the field descriptor
-				fieldDescLoc = partsDataLen++;
-				partsDataLen++;
-
-				//Extra Temperature (2nd byte optional, 1st required), 1 to 2 bytes
-				//Store temperature as an offset of 21C(294.15K) or go into a 16byte int and store the whole thing
-				if(fabs(particles[i].temp-294.15f)<127)
+				if (elements[part.type].CarriesTypeIn & (1U << index))
 				{
-					tempTemp = floor(particles[i].temp-294.15f+0.5f);
-					partsData[partsDataLen++] = tempTemp;
-				}
-				else
-				{
-					fieldDesc |= 1;
-					tempTemp = (int)(particles[i].temp+0.5f);
-					partsData[partsDataLen++] = tempTemp;
-					partsData[partsDataLen++] = tempTemp >> 8;
-				}
-
-				//Life (optional), 1 to 2 bytes
-				if(particles[i].life)
-				{
-					int life = particles[i].life;
-					if (life > 0xFFFF)
-						life = 0xFFFF;
-					else if (life < 0)
-						life = 0;
-					fieldDesc |= 1 << 1;
-					partsData[partsDataLen++] = life;
-					if (life & 0xFF00)
+					auto *prop = reinterpret_cast<int *>(reinterpret_cast<char *>(&part) + properties[index].Offset);
+					if (sd.IsElement(TYP(*prop)))
 					{
-						fieldDesc |= 1 << 2;
-						partsData[partsDataLen++] = life >> 8;
+						paletteSet.insert(TYP(*prop));
+					}
+					else
+					{
+						*prop = PMAP(ID(*prop), 0);
 					}
 				}
+			}
 
-				//Tmp (optional), 1, 2, or 4 bytes
-				if(particles[i].tmp)
+			//Type (required)
+			partsData[partsDataLen++] = part.type;
+
+			//Location of the field descriptor
+			int fieldDesc3Loc = 0;
+			int fieldDescLoc = partsDataLen++;
+			partsDataLen++;
+
+			auto tmp3 = (unsigned int)(part.tmp3);
+			auto tmp4 = (unsigned int)(part.tmp4);
+			if ((tmp3 || tmp4) && (!PressureInTmp3(part.type) || hasPressure))
+			{
+				fieldDesc |= 1 << 13;
+				// The tmp3 of PressureInTmp3 elements is okay to truncate because the loading code
+				// sign extends it anyway, expecting the value to not be higher in magnitude than
+				// 256 (max pressure value) * 64 (tmp3 multiplicative bias).
+				if (((tmp3 >> 16) || (tmp4 >> 16)) && !PressureInTmp3(part.type))
 				{
-					fieldDesc |= 1 << 3;
-					partsData[partsDataLen++] = particles[i].tmp;
-					if(particles[i].tmp & 0xFFFFFF00)
+					fieldDesc |= 1 << 15;
+					fieldDesc |= 1 << 16;
+					RESTRICTVERSION(97, 0);
+				}
+			}
+
+			// Extra type byte if necessary
+			if (part.type & 0xFF00)
+			{
+				partsData[partsDataLen++] = part.type >> 8;
+				fieldDesc |= 1 << 14;
+				RESTRICTVERSION(93, 0);
+			}
+
+			//Extra Temperature (2nd byte optional, 1st required), 1 to 2 bytes
+			//Store temperature as an offset of 21C(294.15K) or go into a 16byte int and store the whole thing
+			if(fabs(part.temp-294.15f)<127)
+			{
+				tempTemp = int(floor(part.temp-294.15f+0.5f));
+				partsData[partsDataLen++] = tempTemp;
+			}
+			else
+			{
+				fieldDesc |= 1;
+				tempTemp = (int)(part.temp+0.5f);
+				partsData[partsDataLen++] = tempTemp;
+				partsData[partsDataLen++] = tempTemp >> 8;
+			}
+
+			if (fieldDesc & (1 << 15))
+			{
+				fieldDesc3Loc = partsDataLen++;
+			}
+
+			//Life (optional), 1 to 2 bytes
+			if(part.life)
+			{
+				int life = part.life;
+				if (life > 0xFFFF)
+					life = 0xFFFF;
+				else if (life < 0)
+					life = 0;
+				fieldDesc |= 1 << 1;
+				partsData[partsDataLen++] = life;
+				if (life & 0xFF00)
+				{
+					fieldDesc |= 1 << 2;
+					partsData[partsDataLen++] = life >> 8;
+				}
+			}
+
+			//Tmp (optional), 1, 2, or 4 bytes
+			if(part.tmp)
+			{
+				fieldDesc |= 1 << 3;
+				partsData[partsDataLen++] = part.tmp;
+				if(part.tmp & 0xFFFFFF00)
+				{
+					fieldDesc |= 1 << 4;
+					partsData[partsDataLen++] = part.tmp >> 8;
+					if(part.tmp & 0xFFFF0000)
 					{
-						fieldDesc |= 1 << 4;
-						partsData[partsDataLen++] = particles[i].tmp >> 8;
-						if(particles[i].tmp & 0xFFFF0000)
+						fieldDesc |= 1 << 12;
+						partsData[partsDataLen++] = (part.tmp&0xFF000000)>>24;
+						partsData[partsDataLen++] = (part.tmp&0x00FF0000)>>16;
+					}
+				}
+			}
+
+			//Ctype (optional), 1 or 4 bytes
+			if(part.ctype)
+			{
+				fieldDesc |= 1 << 5;
+				partsData[partsDataLen++] = part.ctype;
+				if(part.ctype & 0xFFFFFF00)
+				{
+					fieldDesc |= 1 << 9;
+					partsData[partsDataLen++] = (part.ctype&0xFF000000)>>24;
+					partsData[partsDataLen++] = (part.ctype&0x00FF0000)>>16;
+					partsData[partsDataLen++] = (part.ctype&0x0000FF00)>>8;
+				}
+			}
+
+			//Dcolour (optional), 4 bytes
+			if(part.dcolour && (part.dcolour & 0xFF000000 || part.type == PT_LIFE))
+			{
+				fieldDesc |= 1 << 6;
+				partsData[partsDataLen++] = (part.dcolour&0xFF000000)>>24;
+				partsData[partsDataLen++] = (part.dcolour&0x00FF0000)>>16;
+				partsData[partsDataLen++] = (part.dcolour&0x0000FF00)>>8;
+				partsData[partsDataLen++] = (part.dcolour&0x000000FF);
+			}
+
+			//VX (optional), 1 byte
+			if(fabs(part.vx) > 0.001f)
+			{
+				fieldDesc |= 1 << 7;
+				vTemp = (int)(part.vx*16.0f+127.5f);
+				if (vTemp<0) vTemp=0;
+				if (vTemp>255) vTemp=255;
+				partsData[partsDataLen++] = vTemp;
+			}
+
+			//VY (optional), 1 byte
+			if(fabs(part.vy) > 0.001f)
+			{
+				fieldDesc |= 1 << 8;
+				vTemp = (int)(part.vy*16.0f+127.5f);
+				if (vTemp<0) vTemp=0;
+				if (vTemp>255) vTemp=255;
+				partsData[partsDataLen++] = vTemp;
+			}
+
+			//Tmp2 (optional), 1 or 2 bytes
+			if(part.tmp2)
+			{
+				fieldDesc |= 1 << 10;
+				partsData[partsDataLen++] = part.tmp2;
+				if(part.tmp2 & 0xFF00)
+				{
+					fieldDesc |= 1 << 11;
+					partsData[partsDataLen++] = part.tmp2 >> 8;
+				}
+			}
+
+			//tmp3 and tmp4, 4 bytes
+			if (fieldDesc & (1 << 13))
+			{
+				partsData[partsDataLen++] = tmp3     ;
+				partsData[partsDataLen++] = tmp3 >> 8;
+				partsData[partsDataLen++] = tmp4     ;
+				partsData[partsDataLen++] = tmp4 >> 8;
+				if (fieldDesc & (1 << 16))
+				{
+					partsData[partsDataLen++] = tmp3 >> 16;
+					partsData[partsDataLen++] = tmp3 >> 24;
+					partsData[partsDataLen++] = tmp4 >> 16;
+					partsData[partsDataLen++] = tmp4 >> 24;
+				}
+			}
+
+			//Write the field descriptor
+			partsData[fieldDescLoc] = fieldDesc;
+			partsData[fieldDescLoc+1] = fieldDesc>>8;
+			if (fieldDesc & (1 << 15))
+			{
+				partsData[fieldDesc3Loc] = fieldDesc>>16;
+			}
+
+			if (part.type == PT_SOAP)
+				soapCount++;
+
+			if (part.type == PT_RPEL && part.ctype)
+			{
+				RESTRICTVERSION(91, 4);
+			}
+			else if (part.type == PT_NWHL && part.tmp)
+			{
+				RESTRICTVERSION(91, 5);
+			}
+			if (part.type == PT_HEAC || part.type == PT_SAWD || part.type == PT_POLO
+					|| part.type == PT_RFRG || part.type == PT_RFGL || part.type == PT_LSNS)
+			{
+				RESTRICTVERSION(92, 0);
+			}
+			else if ((part.type == PT_FRAY || part.type == PT_INVIS) && part.tmp)
+			{
+				RESTRICTVERSION(92, 0);
+			}
+			else if (part.type == PT_PIPE || part.type == PT_PPIP)
+			{
+				RESTRICTVERSION(93, 0);
+			}
+			if (part.type == PT_TSNS || part.type == PT_PSNS
+			        || part.type == PT_HSWC || part.type == PT_PUMP)
+			{
+				if (part.tmp == 1)
+				{
+					RESTRICTVERSION(93, 0);
+				}
+			}
+			if (PMAPBITS > 8)
+			{
+				for (auto index : possiblyCarriesType)
+				{
+					if (builtinElements[part.type].CarriesTypeIn & (1U << index))
+					{
+						auto *prop = reinterpret_cast<const int *>(reinterpret_cast<const char *>(&part) + properties[index].Offset);
+						if (TYP(*prop) > 0xFF)
 						{
-							fieldDesc |= 1 << 12;
-							partsData[partsDataLen++] = (particles[i].tmp&0xFF000000)>>24;
-							partsData[partsDataLen++] = (particles[i].tmp&0x00FF0000)>>16;
+							RESTRICTVERSION(93, 0);
 						}
 					}
 				}
-
-				//Ctype (optional), 1 or 4 bytes
-				if(particles[i].ctype)
-				{
-					fieldDesc |= 1 << 5;
-					partsData[partsDataLen++] = particles[i].ctype;
-					if(particles[i].ctype & 0xFFFFFF00)
-					{
-						fieldDesc |= 1 << 9;
-						partsData[partsDataLen++] = (particles[i].ctype&0xFF000000)>>24;
-						partsData[partsDataLen++] = (particles[i].ctype&0x00FF0000)>>16;
-						partsData[partsDataLen++] = (particles[i].ctype&0x0000FF00)>>8;
-					}
-				}
-
-				//Dcolour (optional), 4 bytes
-				if(particles[i].dcolour && (particles[i].dcolour & 0xFF000000))
-				{
-					fieldDesc |= 1 << 6;
-					partsData[partsDataLen++] = (particles[i].dcolour&0xFF000000)>>24;
-					partsData[partsDataLen++] = (particles[i].dcolour&0x00FF0000)>>16;
-					partsData[partsDataLen++] = (particles[i].dcolour&0x0000FF00)>>8;
-					partsData[partsDataLen++] = (particles[i].dcolour&0x000000FF);
-				}
-
-				//VX (optional), 1 byte
-				if(fabs(particles[i].vx) > 0.001f)
-				{
-					fieldDesc |= 1 << 7;
-					vTemp = (int)(particles[i].vx*16.0f+127.5f);
-					if (vTemp<0) vTemp=0;
-					if (vTemp>255) vTemp=255;
-					partsData[partsDataLen++] = vTemp;
-				}
-
-				//VY (optional), 1 byte
-				if(fabs(particles[i].vy) > 0.001f)
-				{
-					fieldDesc |= 1 << 8;
-					vTemp = (int)(particles[i].vy*16.0f+127.5f);
-					if (vTemp<0) vTemp=0;
-					if (vTemp>255) vTemp=255;
-					partsData[partsDataLen++] = vTemp;
-				}
-
-				//Tmp2 (optional), 1 or 2 bytes
-				if(particles[i].tmp2)
-				{
-					fieldDesc |= 1 << 10;
-					partsData[partsDataLen++] = particles[i].tmp2;
-					if(particles[i].tmp2 & 0xFF00)
-					{
-						fieldDesc |= 1 << 11;
-						partsData[partsDataLen++] = particles[i].tmp2 >> 8;
-					}
-				}
-
-				//Pavg, 4 bytes
-				//Don't save pavg for things that break under pressure, because then they will break when the save is loaded, since pressure isn't also loaded
-				if ((particles[i].pavg[0] || particles[i].pavg[1]) && !(particles[i].type == PT_QRTZ || particles[i].type == PT_GLAS || particles[i].type == PT_TUNG))
-				{
-					fieldDesc |= 1 << 13;
-					partsData[partsDataLen++] = (int)particles[i].pavg[0];
-					partsData[partsDataLen++] = ((int)particles[i].pavg[0])>>8;
-					partsData[partsDataLen++] = (int)particles[i].pavg[1];
-					partsData[partsDataLen++] = ((int)particles[i].pavg[1])>>8;
-				}
-
-				//Write the field descriptor
-				partsData[fieldDescLoc] = fieldDesc;
-				partsData[fieldDescLoc+1] = fieldDesc>>8;
-
-				//Get the pmap entry for the next particle in the same position
-				i = partsPosLink[i];
 			}
+			if (part.type == PT_LDTC)
+			{
+				RESTRICTVERSION(94, 0);
+			}
+			if (part.type == PT_TSNS || part.type == PT_PSNS)
+			{
+				if (part.tmp == 2)
+				{
+					RESTRICTVERSION(94, 0);
+				}
+			}
+			if (part.type == PT_LSNS)
+			{
+				if (part.tmp >= 1 && part.tmp <= 3)
+				{
+					RESTRICTVERSION(95, 0);
+				}
+			}
+			if (part.type == PT_LIFE)
+			{
+				RESTRICTVERSION(96, 0);
+			}
+			if (part.type == PT_GLAS && part.life > 0)
+			{
+				RESTRICTVERSION(97, 0);
+			}
+			if (PressureInTmp3(part.type))
+			{
+				RESTRICTVERSION(97, 0);
+			}
+			if (part.type == PT_CONV && part.tmp2 != 0)
+			{
+				RESTRICTVERSION(97, 0);
+			}
+			if (part.type == PT_RSST || part.type == PT_RSSS)
+			{
+				RESTRICTVERSION(98, 0);
+			}
+			if (part.type == PT_ETRD && (part.tmp || part.tmp2))
+			{
+				RESTRICTVERSION(98, 0);
+			}
+
+			//Get the pmap entry for the next particle in the same position
+			i = partsPosLink[i];
 		}
 	}
 
-	soapLinkData = (unsigned char*)malloc(3*elementCount[PT_SOAP]);
-	soapLinkDataLen = 0;
-	//Iterate through particles in the same order that they were saved
-	for (y=0;y<fullH;y++)
+	std::vector<PaletteItem> paletteData;
+	for (int ID : paletteSet)
 	{
-		for (x=0;x<fullW;x++)
+		paletteData.push_back(GameSave::PaletteItem(elements[ID].Identifier, ID));
+	}
+
+	unsigned int soapLinkDataLen = 0;
+	std::vector<unsigned char> soapLinkData(3*soapCount);
+	if (soapCount)
+	{
+
+		//Iterate through particles in the same order that they were saved
+		for (auto pos : partS.OriginRect().Range<TOP_TO_BOTTOM, LEFT_TO_RIGHT>())
 		{
 			//Find the first particle in this position
-			i = partsPosFirstMap[y*fullW + x];
+			auto i = partsPosFirstMap[pos];
 
 			//Loop while there is a pmap entry
 			while (i)
@@ -2165,183 +2438,363 @@ char * GameSave::serialiseOPS(unsigned int & dataLength)
 			}
 		}
 	}
-	if(!soapLinkDataLen)
-	{
-		free(soapLinkData);
-		soapLinkData = NULL;
-	}
-	if(!partsDataLen)
-	{
-		free(partsData);
-		partsData = NULL;
-	}
 
-	bson_init(&b);
-	bson_append_start_object(&b, "origin");
-	bson_append_int(&b, "majorVersion", SAVE_VERSION);
-	bson_append_int(&b, "minorVersion", MINOR_VERSION);
-	bson_append_int(&b, "buildNum", BUILD_NUM);
-	bson_append_int(&b, "snapshotId", SNAPSHOT_ID);
-	bson_append_string(&b, "releaseType", IDENT_RELTYPE);
-	bson_append_string(&b, "platform", IDENT_PLATFORM);
-	bson_append_string(&b, "builtType", IDENT_BUILD);
-	bson_append_finish_object(&b);
-	bson_append_start_object(&b, "minimumVersion");
-	bson_append_int(&b, "major", minimumMajorVersion);
-	bson_append_int(&b, "minor", minimumMinorVersion);
-	bson_append_finish_object(&b);
-	
-
-	bson_append_bool(&b, "waterEEnabled", waterEEnabled);
-	bson_append_bool(&b, "legacyEnable", legacyEnable);
-	bson_append_bool(&b, "gravityEnable", gravityEnable);
-	bson_append_bool(&b, "aheat_enable", aheatEnable);
-	bson_append_bool(&b, "paused", paused);
-	bson_append_int(&b, "gravityMode", gravityMode);
-	bson_append_int(&b, "airMode", airMode);
-	bson_append_int(&b, "edgeMode", edgeMode);
-
-	//bson_append_int(&b, "leftSelectedElement", sl);
-	//bson_append_int(&b, "rightSelectedElement", sr);
-	//bson_append_int(&b, "activeMenu", active_menu);
-	if(partsData)
-		bson_append_binary(&b, "parts", BSON_BIN_USER, (const char *)partsData, partsDataLen);
-	if(partsPosData)
-		bson_append_binary(&b, "partsPos", BSON_BIN_USER, (const char *)partsPosData, partsPosDataLen);
-	if(wallData)
-		bson_append_binary(&b, "wallMap", BSON_BIN_USER, (const char *)wallData, wallDataLen);
-	if(fanData)
-		bson_append_binary(&b, "fanMap", BSON_BIN_USER, (const char *)fanData, fanDataLen);
-	if(soapLinkData)
-		bson_append_binary(&b, "soapLinks", BSON_BIN_USER, (const char *)soapLinkData, soapLinkDataLen);
-	if(partsData && palette.size())
-	{
-		bson_append_start_array(&b, "palette");
-		for(std::vector<PaletteItem>::iterator iter = palette.begin(), end = palette.end(); iter != end; ++iter)
-		{
-			bson_append_int(&b, (*iter).first.c_str(), (*iter).second);
-		}
-		bson_append_finish_array(&b);
-	}
-	signsCount = 0;
 	for (size_t i = 0; i < signs.size(); i++)
 	{
-		if(signs[i].text.length() && signs[i].x>=0 && signs[i].x<=fullW && signs[i].y>=0 && signs[i].y<=fullH)
+		if(signs[i].text.length() && partS.OriginRect().Contains({ signs[i].x, signs[i].y }))
+		{
+			int x, y, w, h;
+			bool v95 = false;
+			signs[i].getDisplayText(nullptr, x, y, w, h, true, &v95);
+			if (v95)
+			{
+				RESTRICTVERSION(95, 0);
+			}
+		}
+	}
+
+	Bson b(Bson::Type::objectValue);
+
+	auto &originNode = (b["origin"] = Bson::Type::objectValue);
+	originNode["majorVersion"] = int(effectiveVersion[0]);
+	originNode["minorVersion"] = int(effectiveVersion[1]);
+	originNode["buildNum"] = int(APP_VERSION.build);
+	originNode["modId"] = MOD_ID;
+	originNode["releaseType"] = ByteString(1, IDENT_RELTYPE);
+	originNode["platform"] = ByteString(IDENT_PLATFORM);
+	originNode["ident"] = ByteString(IDENT);
+
+	if (gravityMode == GRAV_CUSTOM)
+	{
+		b["customGravityX"] = double(customGravityX);
+		b["customGravityY"] = double(customGravityY);
+		RESTRICTVERSION(97, 0);
+	}
+
+	auto &minimumVersionNode = (b["minimumVersion"] = Bson::Type::objectValue);
+	minimumVersionNode["major"] = int(minimumVersion[0]);
+	minimumVersionNode["minor"] = int(minimumVersion[1]);
+
+	b["waterEEnabled"] = waterEEnabled;
+	b["legacyEnable"] = legacyEnable;
+	b["gravityEnable"] = gravityEnable;
+	b["aheat_enable"] = aheatEnable;
+	b["paused"] = paused;
+	b["gravityMode"] = gravityMode;
+	b["airMode"] = airMode;
+	if (fabsf(ambientAirTemp - (R_TEMP + 273.15f)) > 0.0001f)
+	{
+		b["ambientAirTemp"] = double(ambientAirTemp);
+		RESTRICTVERSION(96, 0);
+	}
+	if (vorticityCoeff > 0.0001f && vorticityCoeff < 1.0f)
+	{
+		b["vorticityCoeff"] = double(vorticityCoeff);
+		RESTRICTVERSION(100, 0);
+	}
+	b["edgeMode"] = edgeMode;
+
+	if (stkm.hasData())
+	{
+		auto &stkmNode = (b["stkm"] = Bson::Type::objectValue);
+		if (stkm.rocketBoots1)
+		{
+			stkmNode["rocketBoots1"] = stkm.rocketBoots1;
+		}
+		if (stkm.rocketBoots2)
+		{
+			stkmNode["rocketBoots2"] = stkm.rocketBoots2;
+		}
+		if (stkm.fan1)
+		{
+			stkmNode["fan1"] = stkm.fan1;
+		}
+		if (stkm.fan2)
+		{
+			stkmNode["fan2"] = stkm.fan2;
+		}
+		if (stkm.rocketBootsFigh.size())
+		{
+			auto &rocketBootsFighNode = (stkmNode["rocketBootsFigh"] = Bson::Type::arrayValue);
+			for (unsigned int fighNum : stkm.rocketBootsFigh)
+			{
+				rocketBootsFighNode.Append(int(fighNum));
+			}
+		}
+		if (stkm.fanFigh.size())
+		{
+			auto &fanFighNode = (stkmNode["fanFigh"] = Bson::Type::arrayValue);
+			for (unsigned int fighNum : stkm.fanFigh)
+			{
+				fanFighNode.Append(int(fighNum));
+			}
+		}
+	}
+
+	b["pmapbits"] = pmapbits;
+	if (partsDataLen)
+	{
+		partsData.resize(partsDataLen);
+		b["parts"] = std::move(partsData);
+		if (paletteData.size())
+		{
+			Bson paletteNode(Bson::Type::objectValue);
+			for (auto &item : paletteData)
+			{
+				paletteNode[item.first] = item.second;
+			}
+			b["palette"] = paletteNode;
+		}
+		if (partsPosDataLen)
+		{
+			b["partsPos"] = std::move(partsPosData);
+		}
+	}
+	if (hasWallData)
+	{
+		b["wallMap"] = std::move(wallDataBacking);
+	}
+	if (fanDataLen)
+	{
+		b["fanMap"] = std::move(fanData);
+	}
+	if (hasPressure && pressDataLen)
+	{
+		b["pressMap"] = std::move(pressData);
+	}
+	if (hasPressure && vxDataLen)
+	{
+		b["vxMap"] = std::move(vxData);
+	}
+	if (hasPressure && vyDataLen)
+	{
+		b["vyMap"] = std::move(vyData);
+	}
+	if (hasAmbientHeat && this->aheatEnable && ambientDataLen)
+	{
+		b["ambientMap"] = std::move(ambientData);
+	}
+	if (soapLinkDataLen)
+	{
+		b["soapLinks"] = std::move(soapLinkData);
+	}
+	b["blockAir"] = std::move(blockAirData);
+	if (ensureDeterminism)
+	{
+		b["ensureDeterminism"] = ensureDeterminism;
+		b["frameCount"] = int64_t(frameCount);
+		b["rngState"] = std::vector<unsigned char>(
+			reinterpret_cast<const unsigned char *>(&rngState),
+			reinterpret_cast<const unsigned char *>(&rngState) + sizeof(rngState)
+		);
+		RESTRICTVERSION(98, 0);
+	}
+	if (gravityEnable)
+	{
+		b["gravity"] = std::move(gravityData);
+	}
+	unsigned int signsCount = 0;
+	for (size_t i = 0; i < signs.size(); i++)
+	{
+		if(signs[i].text.length() && partS.OriginRect().Contains({ signs[i].x, signs[i].y }))
 		{
 			signsCount++;
 		}
 	}
 	if (signsCount)
 	{
-		bson_append_start_array(&b, "signs");
+		auto &signsNode = (b["signs"] = Bson::Type::arrayValue);
 		for (size_t i = 0; i < signs.size(); i++)
 		{
-			if(signs[i].text.length() && signs[i].x>=0 && signs[i].x<=fullW && signs[i].y>=0 && signs[i].y<=fullH)
+			if(signs[i].text.length() && partS.OriginRect().Contains({ signs[i].x, signs[i].y }))
 			{
-				bson_append_start_object(&b, "sign");
-				bson_append_string(&b, "text", signs[i].text.c_str());
-				bson_append_int(&b, "justification", signs[i].ju);
-				bson_append_int(&b, "x", signs[i].x);
-				bson_append_int(&b, "y", signs[i].y);
-				bson_append_finish_object(&b);
+				auto &signNode = signsNode.Append(Bson::Type::objectValue);
+				signNode["text"] = signs[i].text.ToUtf8();
+				signNode["justification"] = int(signs[i].ju);
+				signNode["x"] = signs[i].x;
+				signNode["y"] = signs[i].y;
 			}
 		}
-		bson_append_finish_array(&b);
 	}
-	bson_finish(&b);
-#ifdef DEBUG
-	bson_print(&b);
-#endif
-
-	finalData = (unsigned char *)bson_data(&b);
-	finalDataLen = bson_size(&b);
-	outputDataLen = finalDataLen*2+12;
-	outputData = new unsigned char[outputDataLen];
-
-	outputData[0] = 'O';
-	outputData[1] = 'P';
-	outputData[2] = 'S';
-	outputData[3] = '1';
-	outputData[4] = SAVE_VERSION;
-	outputData[5] = CELL;
-	outputData[6] = blockW;
-	outputData[7] = blockH;
-	outputData[8] = finalDataLen;
-	outputData[9] = finalDataLen >> 8;
-	outputData[10] = finalDataLen >> 16;
-	outputData[11] = finalDataLen >> 24;
-
-	if (BZ2_bzBuffToBuffCompress((char*)(outputData+12), &outputDataLen, (char*)finalData, bson_size(&b), 9, 0, 0) != BZ_OK)
+	if (authors.GetSize())
 	{
-		puts("Save Error\n");
-		delete [] outputData;
-		dataLength = 0;
-		outputData = NULL;
-		goto fin;
+		auto &authorsNode = (b["authors"] = authors);
+		TrimAuthorsOut(authorsNode, 0);
 	}
 
-#ifdef DEBUG
-	printf("compressed data: %d\n", outputDataLen);
-#endif
-	dataLength = outputDataLen + 12;
+	std::vector<char> finalData;
+	try
+	{
+		finalData = b.Dump(&opsNonconformance);
+	}
+	catch (const Bson::DumpError &ex)
+	{
+		throw BuildException(String::Build("BSON error when dumping save: ", ByteString(ex.what()).FromUtf8()));
+	}
 
-fin:
-	bson_destroy(&b);
-	free(partsData);
-	free(wallData);
-	free(fanData);
-	delete[] elementCount;
-	free(partsSaveIndex);
-	free(soapLinkData);
-	free(partsPosData);
-	free(partsPosFirstMap);
-	free(partsPosLastMap);
-	free(partsPosCount);
-	free(partsPosLink);
+	std::vector<char> outputData;
+	switch (auto status = BZ2WCompress(outputData, finalData))
+	{
+	case BZ2WCompressOk: break;
+	case BZ2WCompressNomem: throw BuildException(String::Build("Save error, out of memory"));
+	default: throw BuildException(String::Build("Cannot compress: status ", int(status)));
+	}
+	auto compressedSize = int(outputData.size());
 
-	return (char*)outputData;
+	if constexpr (DEBUG)
+	{
+		printf("compressed data: %d\n", compressedSize);
+	}
+	outputData.resize(compressedSize + 12);
+
+	auto header = (unsigned char *)&outputData[compressedSize];
+	header[0] = 'O';
+	header[1] = 'P';
+	header[2] = 'S';
+	header[3] = '1';
+	header[4] = effectiveVersion[0];
+	header[5] = CELL;
+	header[6] = blockS.X;
+	header[7] = blockS.Y;
+	auto finalDataLen = uint32_t(finalData.size());
+	header[8] = finalDataLen;
+	header[9] = finalDataLen >> 8;
+	header[10] = finalDataLen >> 16;
+	header[11] = finalDataLen >> 24;
+
+	// move header to front
+	std::rotate(outputData.begin(), outputData.begin() + compressedSize, outputData.end());
+
+	// Mark save as incompatible with latest release
+	bool fakeFromNewerVersion = ALLOW_FAKE_NEWER_VERSION && currentVersion < minimumVersion;
+	return { fakeFromNewerVersion, outputData };
 }
 
-void GameSave::dealloc()
+static void TrimAuthorsIn(Bson &b, int depth)
 {
-	if(particles)
+	for (auto &[ key, child ] : b.As<Bson::Object>())
 	{
-		delete[] particles;
-		particles = NULL;
-	}
-	if(blockMap)
-	{
-		delete[] blockMap;
-		blockMap = NULL;
-	}
-	if(blockMapPtr)
-	{
-		delete[] blockMapPtr;
-		blockMapPtr = NULL;
-	}
-	if(fanVelX)
-	{
-		delete[] fanVelX;
-		fanVelX = NULL;
-	}
-	if(fanVelXPtr)
-	{
-		delete[] fanVelXPtr;
-		fanVelXPtr = NULL;
-	}
-	if(fanVelY)
-	{
-		delete[] fanVelY;
-		fanVelY = NULL;
-	}
-	if(fanVelYPtr)
-	{
-		delete[] fanVelYPtr;
-		fanVelYPtr = NULL;
+		if (child.Is<Bson::Array>())
+		{
+			Bson newChild(Bson::Type::arrayValue);
+			if (depth < 5)
+			{
+				int length = 0, length2 = 0;
+				for (auto &link : child.As<Bson::Array>())
+				{
+					if (link.Is<Bson::Object>())
+					{
+						auto &newLink = newChild.Append(link);
+						TrimAuthorsIn(newLink, depth + 1);
+						length++;
+					}
+					else if (link.Is<int32_t>())
+					{
+						newChild.Append(link.As<int32_t>());
+					}
+					length2++;
+					if (length > (40 / ((depth + 1) * (depth + 1))) || length2 > 50)
+					{
+						break;
+					}
+				}
+			}
+			child = std::move(newChild);
+		}
 	}
 }
 
-GameSave::~GameSave()
+static std::set<int> GetNestedSaveIDs(const Bson &j)
 {
-	dealloc();
+	std::set<int> saveIDs;
+	for (auto &[ key, member ] : j.As<Bson::Object>())
+	{
+		if (member.Is<int32_t>())
+		{
+			saveIDs.insert(member.As<int32_t>());
+		}
+		else if (member.Is<Bson::Array>())
+		{
+			for (auto &link : member.As<Bson::Array>())
+			{
+				// only supports objects and ints here because that is all we need
+				if (link.Is<int32_t>())
+				{
+					saveIDs.insert(link.As<int32_t>());
+					continue;
+				}
+				if (!link.Is<Bson::Object>())
+				{
+					continue;
+				}
+				auto nestedSaveIDs = GetNestedSaveIDs(link);
+				saveIDs.insert(nestedSaveIDs.begin(), nestedSaveIDs.end());
+			}
+		}
+	}
+	return saveIDs;
+}
+
+// converts a json object to bson
+static void TrimAuthorsOut(Bson &b, int depth)
+{
+	for (auto &[ key, member ] : b.As<Bson::Object>())
+	{
+		if (member.Is<Bson::Array>())
+		{
+			Bson newChild(Bson::Type::arrayValue);
+			std::set<int> saveIDs;
+			int length = 0;
+			for (auto &link : member.As<Bson::Array>())
+			{
+				// only supports objects and ints here because that is all we need
+				if (link.Is<int32_t>())
+				{
+					saveIDs.insert(link.As<int32_t>());
+					continue;
+				}
+				if (!link.Is<Bson::Object>())
+				{
+					continue;
+				}
+				if (depth > 4 || length > 40 / ((depth + 1) * (depth + 1)))
+				{
+					std::set<int> nestedSaveIDs = GetNestedSaveIDs(link);
+					saveIDs.insert(nestedSaveIDs.begin(), nestedSaveIDs.end());
+				}
+				else
+				{
+					auto &newLink = newChild.Append(link);
+					TrimAuthorsOut(newLink, depth + 1);
+				}
+				length++;
+			}
+			for (auto id : saveIDs)
+			{
+				newChild.Append(id);
+			}
+			member = std::move(newChild);
+		}
+	}
+}
+
+bool GameSave::PressureInTmp3(int type)
+{
+	return type == PT_QRTZ || type == PT_GLAS || type == PT_TUNG;
+}
+
+GameSave& GameSave::operator << (Particle &v)
+{
+	if(particlesCount<NPART && v.type)
+	{
+		particles[particlesCount++] = v;
+	}
+	return *this;
+}
+
+GameSave& GameSave::operator << (sign &v)
+{
+	if(signs.size()<MAXSIGNS && v.text.length())
+		signs.push_back(v);
+	return *this;
 }

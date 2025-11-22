@@ -1,41 +1,54 @@
 #include "RenderController.h"
 
-RenderController::RenderController(Renderer * ren, ControllerCallback * callback):
+#include "RenderView.h"
+#include "RenderModel.h"
+
+#include "Controller.h"
+
+RenderController::RenderController(Simulation *sim, Renderer * ren, RendererSettings *rendererSettings, std::function<void ()> onDone_):
 	HasExited(false)
 {
 	renderView = new RenderView();
 	renderModel = new RenderModel();
 
+	renderModel->SetRenderer(ren, rendererSettings);
+
 	renderView->AttachController(this);
 	renderModel->AddObserver(renderView);
 
-	renderModel->SetRenderer(ren);
-	this->callback = callback;
+	renderModel->SetSimulation(sim);
+
+	onDone = onDone_;
 }
 
-void RenderController::SetRenderMode(unsigned int renderMode)
+void RenderController::SetRenderMode(uint32_t newRenderMode)
 {
-	renderModel->SetRenderMode(renderMode);
+	renderModel->SetRenderMode(newRenderMode);
 }
 
-void RenderController::UnsetRenderMode(unsigned int renderMode)
+uint32_t RenderController::GetRenderMode()
 {
-	renderModel->UnsetRenderMode(renderMode);
+	return renderModel->GetRenderMode();
 }
 
-void RenderController::SetDisplayMode(unsigned int renderMode)
+void RenderController::SetDisplayMode(uint32_t newDisplayMode)
 {
-	renderModel->SetDisplayMode(renderMode);
+	renderModel->SetDisplayMode(newDisplayMode);
 }
 
-void RenderController::UnsetDisplayMode(unsigned int renderMode)
+uint32_t RenderController::GetDisplayMode()
 {
-	renderModel->UnsetDisplayMode(renderMode);
+	return renderModel->GetDisplayMode();
 }
 
-void RenderController::SetColourMode(unsigned int renderMode)
+void RenderController::SetColorMode(uint32_t newColorMode)
 {
-	renderModel->SetColourMode(renderMode);
+	renderModel->SetColorMode(newColorMode);
+}
+
+uint32_t RenderController::GetColorMode()
+{
+	return renderModel->GetColorMode();
 }
 
 void RenderController::LoadRenderPreset(int presetNum)
@@ -45,22 +58,16 @@ void RenderController::LoadRenderPreset(int presetNum)
 
 void RenderController::Exit()
 {
-	if(ui::Engine::Ref().GetWindow() == renderView)
-	{
-		ui::Engine::Ref().CloseWindow();
-	}
-	if(callback)
-		callback->ControllerExit();
+	renderView->CloseActiveWindow();
+	if (onDone)
+		onDone();
 	HasExited = true;
 }
 
-RenderController::~RenderController() {
-	if(ui::Engine::Ref().GetWindow() == renderView)
-	{
-		ui::Engine::Ref().CloseWindow();
-	}
-	delete callback;
+RenderController::~RenderController()
+{
 	delete renderModel;
+	renderView->CloseActiveWindow();
 	delete renderView;
 }
 

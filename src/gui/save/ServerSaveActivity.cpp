@@ -1,119 +1,74 @@
 #include "ServerSaveActivity.h"
+#include "graphics/Graphics.h"
+#include "graphics/VideoBuffer.h"
 #include "gui/interface/Label.h"
 #include "gui/interface/Textbox.h"
 #include "gui/interface/Button.h"
 #include "gui/interface/Checkbox.h"
-#include "client/requestbroker/RequestBroker.h"
 #include "gui/dialogues/ErrorMessage.h"
 #include "gui/dialogues/SaveIDMessage.h"
 #include "gui/dialogues/ConfirmPrompt.h"
 #include "gui/dialogues/InformationMessage.h"
 #include "client/Client.h"
+#include "client/ThumbnailRendererTask.h"
+#include "client/GameSave.h"
+#include "client/http/UploadSaveRequest.h"
 #include "tasks/Task.h"
 #include "gui/Style.h"
-#include "client/GameSave.h"
-#include "images.h"
-
-class ServerSaveActivity::CancelAction: public ui::ButtonAction
-{
-	ServerSaveActivity * a;
-public:
-	CancelAction(ServerSaveActivity * a) : a(a) {}
-	virtual void ActionCallback(ui::Button * sender)
-	{
-		a->Exit();
-	}
-};
-
-class ServerSaveActivity::SaveAction: public ui::ButtonAction
-{
-	ServerSaveActivity * a;
-public:
-	SaveAction(ServerSaveActivity * a) : a(a) {}
-	virtual void ActionCallback(ui::Button * sender)
-	{
-		a->Save();
-	}
-};
-
-class ServerSaveActivity::PublishingAction: public ui::ButtonAction
-{
-	ServerSaveActivity * a;
-public:
-	PublishingAction(ServerSaveActivity * a) : a(a) {}
-	virtual void ActionCallback(ui::Button * sender)
-	{
-		a->ShowPublishingInfo();
-	}
-};
-
-class ServerSaveActivity::RulesAction: public ui::ButtonAction
-{
-	ServerSaveActivity * a;
-public:
-	RulesAction(ServerSaveActivity * a) : a(a) {}
-	virtual void ActionCallback(ui::Button * sender)
-	{
-		a->ShowRules();
-	}
-};
-
-class ServerSaveActivity::NameChangedAction: public ui::TextboxAction
-{
-public:
-	ServerSaveActivity * a;
-	NameChangedAction(ServerSaveActivity * a) : a(a) {}
-	virtual void TextChangedCallback(ui::Textbox * sender) {
-		a->CheckName(sender->GetText());
-	}
-};
 
 class SaveUploadTask: public Task
 {
-	SaveInfo save;
+	SaveInfo &save;
 
-	virtual void before()
+	void before() override
 	{
 
 	}
 
-	virtual void after()
+	void after() override
 	{
 
 	}
 
-	virtual bool doWork()
+	bool doWork() override
 	{
 		notifyProgress(-1);
-		return Client::Ref().UploadSave(save) == RequestOkay;
+		auto uploadSaveRequest = std::make_unique<http::UploadSaveRequest>(save);
+		uploadSaveRequest->Start();
+		uploadSaveRequest->Wait();
+		try
+		{
+			save.SetID(uploadSaveRequest->Finish());
+		}
+		catch (const http::RequestError &ex)
+		{
+			notifyError(ByteString(ex.what()).FromUtf8());
+			return false;
+		}
+		return true;
 	}
 
 public:
-	SaveInfo GetSave()
-	{
-		return save;
-	}
-
-	SaveUploadTask(SaveInfo save):
-		save(save)
+	SaveUploadTask(SaveInfo &newSave):
+		save(newSave)
 	{
 
 	}
 };
 
-ServerSaveActivity::ServerSaveActivity(SaveInfo save, ServerSaveActivity::SaveUploadedCallback * callback) :
+ServerSaveActivity::ServerSaveActivity(std::unique_ptr<SaveInfo> newSave, OnUploaded onUploaded_) :
 	WindowActivity(ui::Point(-1, -1), ui::Point(440, 200)),
-	thumbnail(NULL),
-	save(save),
-	callback(callback),
-	saveUploadTask(NULL)
+	thumbnailRenderer(nullptr),
+	save(std::move(newSave)),
+	onUploaded(onUploaded_),
+	saveUploadTask(nullptr)
 {
 	titleLabel = new ui::Label(ui::Point(4, 5), ui::Point((Size.X/2)-8, 16), "");
 	titleLabel->SetTextColour(style::Colour::InformationTitle);
 	titleLabel->Appearance.HorizontalAlign = ui::Appearance::AlignLeft;
 	titleLabel->Appearance.VerticalAlign = ui::Appearance::AlignMiddle;
 	AddComponent(titleLabel);
-	CheckName(save.GetName()); //set titleLabel text
+	CheckName(save->GetName()); //set titleLabel text
 
 	ui::Label * previewLabel = new ui::Label(ui::Point((Size.X/2)+4, 5), ui::Point((Size.X/2)-8, 16), "Preview:");
 	previewLabel->SetTextColour(style::Colour::InformationTitle);
@@ -121,14 +76,15 @@ ServerSaveActivity::ServerSaveActivity(SaveInfo save, ServerSaveActivity::SaveUp
 	previewLabel->Appearance.VerticalAlign = ui::Appearance::AlignMiddle;
 	AddComponent(previewLabel);
 
-	nameField = new ui::Textbox(ui::Point(8, 25), ui::Point((Size.X/2)-16, 16), save.GetName(), "[save name]");
+	nameField = new ui::Textbox(ui::Point(8, 25), ui::Point((Size.X/2)-16, 16), save->GetName(), "[save name]");
 	nameField->Appearance.VerticalAlign = ui::Appearance::AlignMiddle;
 	nameField->Appearance.HorizontalAlign = ui::Appearance::AlignLeft;
-	nameField->SetActionCallback(new NameChangedAction(this));
+	nameField->SetActionCallback({ [this] { CheckName(nameField->GetText()); } });
+	nameField->SetLimit(50);
 	AddComponent(nameField);
 	FocusComponent(nameField);
 
-	descriptionField = new ui::Textbox(ui::Point(8, 65), ui::Point((Size.X/2)-16, Size.Y-(65+16+4)), save.GetDescription(), "[save description]");
+	descriptionField = new ui::Textbox(ui::Point(8, 65), ui::Point((Size.X/2)-16, Size.Y-(65+16+4)), save->GetDescription(), "[save description]");
 	descriptionField->SetMultiline(true);
 	descriptionField->SetLimit(254);
 	descriptionField->Appearance.VerticalAlign = ui::Appearance::AlignTop;
@@ -136,27 +92,30 @@ ServerSaveActivity::ServerSaveActivity(SaveInfo save, ServerSaveActivity::SaveUp
 	AddComponent(descriptionField);
 
 	publishedCheckbox = new ui::Checkbox(ui::Point(8, 45), ui::Point((Size.X/2)-80, 16), "Publish", "");
-	if(Client::Ref().GetAuthUser().Username != save.GetUserName())
+	auto user = Client::Ref().GetAuthUser();
+	if (!(user && user->Username == save->GetUserName()))
 	{
 		//Save is not owned by the user, disable by default
-		publishedCheckbox->SetChecked(false);	
+		publishedCheckbox->SetChecked(false);
 	}
 	else
 	{
 		//Save belongs to the current user, use published state already set
-		publishedCheckbox->SetChecked(save.GetPublished());
+		publishedCheckbox->SetChecked(save->GetPublished());
 	}
 	AddComponent(publishedCheckbox);
 
 	pausedCheckbox = new ui::Checkbox(ui::Point(160, 45), ui::Point(55, 16), "Paused", "");
-	pausedCheckbox->SetChecked(save.GetGameSave()->paused);
+	pausedCheckbox->SetChecked(save->GetGameSave()->paused);
 	AddComponent(pausedCheckbox);
 
 	ui::Button * cancelButton = new ui::Button(ui::Point(0, Size.Y-16), ui::Point((Size.X/2)-75, 16), "Cancel");
 	cancelButton->Appearance.HorizontalAlign = ui::Appearance::AlignLeft;
 	cancelButton->Appearance.VerticalAlign = ui::Appearance::AlignMiddle;
 	cancelButton->Appearance.BorderInactive = ui::Colour(200, 200, 200);
-	cancelButton->SetActionCallback(new CancelAction(this));
+	cancelButton->SetActionCallback({ [this] {
+		Exit();
+	} });
 	AddComponent(cancelButton);
 	SetCancelButton(cancelButton);
 
@@ -164,7 +123,9 @@ ServerSaveActivity::ServerSaveActivity(SaveInfo save, ServerSaveActivity::SaveUp
 	okayButton->Appearance.HorizontalAlign = ui::Appearance::AlignLeft;
 	okayButton->Appearance.VerticalAlign = ui::Appearance::AlignMiddle;
 	okayButton->Appearance.TextInactive = style::Colour::InformationTitle;
-	okayButton->SetActionCallback(new SaveAction(this));
+	okayButton->SetActionCallback({ [this] {
+		Save();
+	} });
 	AddComponent(okayButton);
 	SetOkayButton(okayButton);
 
@@ -172,26 +133,33 @@ ServerSaveActivity::ServerSaveActivity(SaveInfo save, ServerSaveActivity::SaveUp
 	PublishingInfoButton->Appearance.HorizontalAlign = ui::Appearance::AlignCentre;
 	PublishingInfoButton->Appearance.VerticalAlign = ui::Appearance::AlignMiddle;
 	PublishingInfoButton->Appearance.TextInactive = style::Colour::InformationTitle;
-	PublishingInfoButton->SetActionCallback(new PublishingAction(this));
+	PublishingInfoButton->SetActionCallback({ [this] {
+		ShowPublishingInfo();
+	} });
 	AddComponent(PublishingInfoButton);
 
 	ui::Button * RulesButton = new ui::Button(ui::Point((Size.X*3/4)-75, Size.Y-22), ui::Point(150, 16), "Save Uploading Rules");
 	RulesButton->Appearance.HorizontalAlign = ui::Appearance::AlignCentre;
 	RulesButton->Appearance.VerticalAlign = ui::Appearance::AlignMiddle;
 	RulesButton->Appearance.TextInactive = style::Colour::InformationTitle;
-	RulesButton->SetActionCallback(new RulesAction(this));
+	RulesButton->SetActionCallback({ [this] {
+		ShowRules();
+	} });
 	AddComponent(RulesButton);
 
-	if(save.GetGameSave())
-		RequestBroker::Ref().RenderThumbnail(save.GetGameSave(), false, true, (Size.X/2)-16, -1, this);
+	if (save->GetGameSave())
+	{
+		thumbnailRenderer = new ThumbnailRendererTask(*save->GetGameSave(), Size / 2 - Vec2(16, 16), RendererSettings::decorationAntiClickbait, true);
+		thumbnailRenderer->Start();
+	}
 }
 
-ServerSaveActivity::ServerSaveActivity(SaveInfo save, bool saveNow, ServerSaveActivity::SaveUploadedCallback * callback) :
+ServerSaveActivity::ServerSaveActivity(std::unique_ptr<SaveInfo> newSave, bool saveNow, OnUploaded onUploaded_) :
 	WindowActivity(ui::Point(-1, -1), ui::Point(200, 50)),
-	thumbnail(NULL),
-	save(save),
-	callback(callback),
-	saveUploadTask(NULL)
+	thumbnailRenderer(nullptr),
+	save(std::move(newSave)),
+	onUploaded(onUploaded_),
+	saveUploadTask(nullptr)
 {
 	ui::Label * titleLabel = new ui::Label(ui::Point(0, 0), Size, "Saving to server...");
 	titleLabel->SetTextColour(style::Colour::InformationTitle);
@@ -199,7 +167,9 @@ ServerSaveActivity::ServerSaveActivity(SaveInfo save, bool saveNow, ServerSaveAc
 	titleLabel->Appearance.VerticalAlign = ui::Appearance::AlignMiddle;
 	AddComponent(titleLabel);
 
-	saveUploadTask = new SaveUploadTask(save);
+	AddAuthorInfo();
+
+	saveUploadTask = new SaveUploadTask(*this->save);
 	saveUploadTask->AddTaskListener(this);
 	saveUploadTask->Start();
 }
@@ -209,13 +179,13 @@ void ServerSaveActivity::NotifyDone(Task * task)
 	if(!task->GetSuccess())
 	{
 		Exit();
-		new ErrorMessage("Error", Client::Ref().GetLastError());
+		new ErrorMessage("Error", task->GetError());
 	}
 	else
 	{
-		if(callback)
+		if (onUploaded)
 		{
-			callback->SaveUploaded(save);
+			onUploaded(std::move(save));
 		}
 		Exit();
 	}
@@ -223,56 +193,60 @@ void ServerSaveActivity::NotifyDone(Task * task)
 
 void ServerSaveActivity::Save()
 {
-	class PublishConfirmation: public ConfirmDialogueCallback {
-	public:
-		ServerSaveActivity * a;
-		PublishConfirmation(ServerSaveActivity * a) : a(a) {}
-		virtual void ConfirmCallback(ConfirmPrompt::DialogueResult result) {
-			if (result == ConfirmPrompt::ResultOkay)
-			{
-				a->Exit();
-				a->saveUpload();
-			}
-		}
-		virtual ~PublishConfirmation() { }
-	};
-
-	if(nameField->GetText().length())
+	if (!nameField->GetText().length())
 	{
-		if(Client::Ref().GetAuthUser().Username != save.GetUserName() && publishedCheckbox->GetChecked())
-		{
-			new ConfirmPrompt("Publish", "This save was created by " + save.GetUserName() + ", you're about to publish this under your own name; If you haven't been given permission by the author to do so, please uncheck the publish box, otherwise continue", new PublishConfirmation(this));
-		}
-		else
-		{
-			Exit();
+		new ErrorMessage("Error", "You must specify a save name.");
+		return;
+	}
+	auto user = Client::Ref().GetAuthUser();
+	if (!(user && user->Username == save->GetUserName()) && publishedCheckbox->GetChecked())
+	{
+		new ConfirmPrompt("Publish", "This save was created by " + save->GetUserName().FromUtf8() + ", you're about to publish this under your own name; If you haven't been given permission by the author to do so, please uncheck the publish box, otherwise continue", { [this] {
 			saveUpload();
-		}
+		} });
 	}
 	else
 	{
-		new ErrorMessage("Error", "You must specify a save name.");
+		saveUpload();
+	}
+}
+
+void ServerSaveActivity::AddAuthorInfo()
+{
+	Bson serverSaveInfo;
+	serverSaveInfo["type"] = "save";
+	serverSaveInfo["id"] = save->GetID();
+	auto user = Client::Ref().GetAuthUser();
+	serverSaveInfo["username"] = user ? user->Username : ByteString("");
+	serverSaveInfo["title"] = save->GetName().ToUtf8();
+	serverSaveInfo["description"] = save->GetDescription().ToUtf8();
+	serverSaveInfo["published"] = (int)save->GetPublished();
+	serverSaveInfo["date"] = int64_t(time(nullptr));
+	Client::Ref().SaveAuthorInfo(serverSaveInfo);
+	{
+		auto gameSave = save->TakeGameSave();
+		gameSave->authors = serverSaveInfo;
+		save->SetGameSave(std::move(gameSave));
 	}
 }
 
 void ServerSaveActivity::saveUpload()
 {
-	save.SetName(nameField->GetText());
-	save.SetDescription(descriptionField->GetText());
-	save.SetPublished(publishedCheckbox->GetChecked());
-	save.SetUserName(Client::Ref().GetAuthUser().Username);
-	save.SetID(0);
-	save.GetGameSave()->paused = pausedCheckbox->GetChecked();
-
-	if(Client::Ref().UploadSave(save) != RequestOkay)
+	okayButton->Enabled = false;
+	save->SetName(nameField->GetText());
+	save->SetDescription(descriptionField->GetText());
+	save->SetPublished(publishedCheckbox->GetChecked());
+	auto user = Client::Ref().GetAuthUser();
+	save->SetUserName(user ? user->Username : ByteString(""));
+	save->SetID(0);
 	{
-		new ErrorMessage("Error", "Upload failed with error:\n"+Client::Ref().GetLastError());
+		auto gameSave = save->TakeGameSave();
+		gameSave->paused = pausedCheckbox->GetChecked();
+		save->SetGameSave(std::move(gameSave));
 	}
-	else if(callback)
-	{
-		new SaveIDMessage(save.GetID());
-		callback->SaveUploaded(save);
-	}
+	AddAuthorInfo();
+	uploadSaveRequest = std::make_unique<http::UploadSaveRequest>(*save);
+	uploadSaveRequest->Start();
 }
 
 void ServerSaveActivity::Exit()
@@ -282,7 +256,7 @@ void ServerSaveActivity::Exit()
 
 void ServerSaveActivity::ShowPublishingInfo()
 {
-	const char *info =
+	String info =
 		"In The Powder Toy, one can save simulations to their account in two privacy levels: Published and unpublished. You can choose which one by checking or unchecking the 'publish' checkbox. Saves are unpublished by default, so if you do not check publish nobody will be able to see your saves.\n"
 		"\n"
 		"\btPublished saves\bw will appear on the 'By Date' feed and will be seen by many people. These saves also contribute to your Average Score, which is displayed publicly on your profile page on the website. Publish saves that you want people to see so they can comment and vote on.\n"
@@ -299,73 +273,148 @@ void ServerSaveActivity::ShowPublishingInfo()
 
 void ServerSaveActivity::ShowRules()
 {
-	const char *rules =
-		"These are the rules you should follow when uploading saves to avoid having them deleted or otherwise hidden from public view. If you fail to follow them, don't be surprised if your saves get lousy votes, unpublished, or removed from the front page should they make it there. These rules may change at any time as new problems arise, and how each rule is handled changes depending on the situation.\n"
+	String rules =
+		"\boSection S: Social and Community Rules\n"
+		"\bwThere are a few rules you should follow while interacting with the community. These rules are enforced by staff members and any issues related to violations of these rules may be brought to our attention by users. This section applies to saves uploaded, comments area, forums, and other areas of the community.\n"
 		"\n"
-		"\bt1. No image plotting.\bw If you use a program to draw out pixels from an image outside of TPT without drawing it by hand, don't be surprised when the save gets deleted and you get banned.\n"
-		"\bt2. No self voting.\bw This means making more than one account, and then using that account to vote on any save multiple times. We can see this stuff, and people get banned for doing it. Don't do it.\n"
-		"\bt3. No hate saves.\bw This means things like shooting Jews or killing Bieber; these are not allowed.\n"
-		"\bt4. No penis drawings.\bw Or any other explicit or non-explicit sex please. We like to think this is a game that people can play with their family around. Don't post anything too inappropriate.\n"
-		"\bt5. Don't ask people to vote.\bw If your stuff is awesome, you shouldn't have to beg for popularity to get votes. Do not have anything relating to or mentioning votes inside the actual save.\n"
-		   "- This includes vote signs in the game, drawings of vote arrows, or almost any mention of voting in the save. If you want to thank people for the votes they have given, that can be a small note in the description or comments, but don't make it excessive either. Testing this rule to see how far you can go is a bad idea and may get your save unpublished.\n"
-		   "- Gimmicks for getting votes like \"100 votes and I'll make a better version\" are similarly frowned upon.\n"
-		"\bt6. Keep the number of logos and signs to a minimum.\bw They not only slow the game down, but can also make saves unappealing for people to use. \n"
-		   "- If you link to more then 3 unrelated saves using link signs, this is just too much advertising, and the save will probably be removed from the front page if it gets there.\n"
-		   "- Please do not make fake update signs or similar fake notification signs either.\n"
-		"\bt7. Please don't swear excessively.\bw Saves containing excessive swearing or rude language will be unpublished. Don't make rude or offensive comments either.\n"
-		"\bt8. Don't make text-only saves.\bw Saves are much better when they actually use some of the features in the game. Text-only saves will be removed from the front page should they ever get there.\n"
-		   "- Also, element suggestion saves will be removed from the front page. It's recommended that you make a thread on the forum instead so you can get actual criticism from developers and other users.\n"
-		   "- This is also related to art on the front page. Art saves that only rely on the deco layer are generally removed. Art using elements may stay longer if it's more impressive.\n"
-		"\bt9. Don't claim others' work as your own.\bw If you didn't make it, don't resave it for yourself. You can favorite a save instead of publishing a copy if you want to see it later.\n"
-		   "- This doesn't mean you can't modify or improve saves; building on the works of others is encouraged. If you give credit to the original author, it is usually OK to resave unless the author specifically prohibits it.\n"
-		"\bt10. Don't make laggy saves.\bw If a save is so laggy that it crashes the game for some people, it's just really annoying. Saves that do make it to the front page that purposely lag the game will be demoted.\n"
+		"\bt1. Try to use proper grammar.\bw English is the official community language, but use is not required in regional or cultural groups. If you cannot write English well, we advise that you use Google Translate.\n"
+		"\bt2. Do not spam.\bw There's not a one size fits all definition here, but the idea is usually obvious. In addition, the following are seen as spam and may be hidden or deleted:\n"
+		   "- Posting multiple threads on the same subject. Try to combine threads on game feedback or suggestions into one thread.\n"
+		   "- Bumping an old thread by replying. This is what we call 'necro' or 'necroing'. The content of the thread may be stale (fixing issues, ideas, etc). We recommend posting a new thread for an updated or more current response.\n"
+		   "- Posting on a thread with '+1' or other short replies. There's no need to constantly bump a thread and make finding replies difficult. Replies are great for constructive feedback, while the '+1' button is to show your support for the content.\n"
+		   "- Comments that are excessively long or gibberish. Making comments such as repeating the same letter or have little to no intended purpose, fall under this rule. Comments that are in a different language are exempt.\n"
+		   "- Excessive formatting. UPPERCASE, Bold, and italics can be nice with moderate use, but please do not use them throughout the entire post.\n"
+		"\bt3. Keep swearing to a minimum.\bw Comments or saves containing swearing are at risk of being deleted. This also includes swearing in other languages.\n"
+		"\bt4. Refrain from uploading sexually explicit, offensive, or other inappropriate materials.\bw\n"
+		   "- These include, but are not limited to: sex, drugs, racism, excessive politics, or anything that offends or insults a group of people.\n"
+		   "- Reference to these topics in other languages is also prohibited. Do not attempt to bypass this rule.\n"
+		   "- Posting URLs or images that violate this rule is prohibited. This includes links or text in your profile information.\n"
+		"\bt5. Do not advertise third-party games, sites, or other places not related to The Powder Toy.\bw\n"
+		   "- Mainly this rule is intended to prevent people going through and advertising their own games and products.\n"
+		   "- Unauthorized or unofficial community gathering places, such as Discord, are prohibited.\n"
+		"\bt6. Trolling is not allowed.\bw As with some rules, there's no clear definition. Users who repeatedly troll are far more likely to be banned and receive longer bans than others.\n"
+		"\bt7. Do not impersonate anyone.\bw Registering accounts with names intentionally similar to other users in our community or other online communities is prohibited.\n"
+		"\bt8. Do not post about moderator decisions or issues.\bw If there is a problem regarding a ban on your account or content removal, please contact a moderator through the messages system. Otherwise, discussion about moderator actions should be avoided.\n"
+		"\bt9. Avoid backseat moderating.\bw Moderators are the ones who make the decisions. Users should refrain from threatening bans or possible results from breaking a rule. If there is a possible issue or you are unsure, we recommend reporting the issue through the 'Report' button or via the messaging system on the website.\n"
+		"\bt10. Condoning of breaking common laws is prohibited.\bw The jurisdiction of which country's laws applies is not clear, but there are some common ones to know. These include, but not limited to:\n"
+		   "- Piracy of software, music, bagels, etc.\n"
+		   "- Hacking / Stealing accounts\n"
+		   "- Theft / Fraud\n"
+		"\bt11. Do not stalk or harass any user.\bw This has been a growing problem in recent years by different methods, but generally these include:\n"
+		   "- 'Doxing' user(s) to find where they live or their real identity\n"
+		   "- Constantly messaging a user when they wish to refrain from any contact\n"
+		   "- Mass downvoting saves\n"
+		   "- Posting rude or unnecessary comments on someone's content (saves, forum threads, etc)\n"
+		   "- Coercing a group of users to 'target' a user\n"
+		   "- Personal arguments or hatred. This could be arguing in the comments or making hate saves\n"
+		   "- Discrimination, in general, of people. This could be religious, ethnic, etc.\n"
 		"\n"
-		"You can report a save breaking any one of these rules, as the moderators are busy in real life too and don't always have the time to search through all saves for these kinds of things. If reporting a copied save, put the save ID of the save it was stolen from in the report.";
+		"\boSection G: In-Game Rules\n"
+		"\bwThis section of the rules is focused on in-game actions. Though, Section S also applies in-game, the following rules are more specialized to in-game community interaction.\n"
+		"\bt1. Don't claim other people's work.\bw This could be simply re-uploading another user's or utilizing large sections of saves. Derivative works are allowed, with proper usage. Should you utilize someone's work, by default you must credit the author. Unless the author has explicitly noted different usage terms, this is the standard policy. Derivative works are characterized by innovative usage and originality percentage (ie. how much is original versus someone's work?). Stolen saves will be unpublished or disabled.\n"
+		"\bt2. Self-voting or vote fraud is not allowed.\bw This is defined as making multiple accounts to vote on your own saves or the saves of others. We enforce this rule strictly, therefore, you must understand that there are very few successful ban appeals. Please ensure you and other accounts are not voting from the same household. All alternate accounts will be permanently banned, the main account will be temporarily banned and any affected saves will be disabaled.\n"
+		"\bt3. Asking for votes of any kind is frowned upon.\bw Saves which do this will be unpublished until the issue is fixed. Examples of such that are under this rules are:\n"
+		   "- Signs that may hint at voting up or down. The signature green arrow or asking for votes goes under this rule.\n"
+		   "- Gimmicks that ask for votes. These might be a total number of votes in exchange for something, like '100 votes and I'll make a better version'. This is what we define as vote farming. Any type of vote farming is not allowed.\n"
+		   "- Asking for votes in return for usage of a save or for any other reason is prohibited.\n"
+		"\bt4. Do not spam.\bw As mentioned earlier, there are no standards for what counts as spam. Here are some examples that may qualify as spamming:\n"
+		   "- Uploading or re-uploading similar saves within a short amount of time. Don't try to circumvent the system to have your saves seen/voted by people. This includes uploading 'junk' or 'blank' saves with little to no purpose. These saves will be unpublished.\n"
+		   "- Uploading text-only saves. These may be announcements or looking for help of sorts. We have the forums and comments area available for many purposes these text-only saves would serve. These saves will be removed from front page.\n"
+		   "- Uploading art saves is not strictly prohibited, but may result in a front-page demotion. We like to see usage of the variety of elements in a creative manner. Lack of these factors (such as in deco-only saves) will typically result in a front-page demotion\n"
+		"\bt5. Refrain from uploading sexually explicit or other inappropriate materials. These saves will be deleted and will lead to a ban.\bw\n"
+		   "- These include, but are not limited to: sex, drugs, racism, excessive politics, or anything that offends or insults a group of people.\n"
+		   "- Don't try to circumvent this rule. Anything that intentionally refers to these concepts/ideas by direct or indirect means falls under this rule.\n"
+		   "- Reference to these topics in other languages is also prohibited. Do not attempt to bypass this rule.\n"
+		   "- Posting URLs or images that violate this rule is prohibited. This includes links or text in your profile information.\n"
+		"\bt6. Image plotting is strictly prohibited.\bw This includes usage of scripting or any third-party tools to plot or create a save for you. Saves using CGI will be deleted and you may receive a ban.\n"
+		"\bt7. Keep logos and signs to a minimum.\bw These saves may be removed from front page. Items that this rule restricts are:\n"
+		   "- Excessive logos placed\n"
+		   "- Signs without intended purpose\n"
+		   "- Fake update or notifications signs\n"
+		   "- Linking other saves that have no related purposes\n"
+		"\bt8. Do not place offtopic or inappropriate tags.\bw Tags are only there to improve search results. They should generally only be one word descriptions of the save. Sentences or subjective tags may be deleted. Inappropriate or offensive tags will likely get you banned.\n"
+		"\bt9. Intentional lag inducing or crashing saves are prohibited.\bw If the majority of users are writing about the save causing crashes or lag, then the save will fall under this rule. These saves will be removed from front page or disabled.\n"
+		"\bt10. Do not misuse the reporting system.\bw Sending in report reasons such as 'bad save' or gibberish wastes our time. Unless the issue pertains to a possible rule violation or community issue, please refrain from sending a report. If you think the save violates or poses a community issue, send a report anyway! Bans will never happen if you are reporting a save in good faith.\n"
+		"\bt11. Do not ask for saves to be demoted or removed from the front-page.\bw Unless the save violates any rules, it will stay on the front-page. There is no exception to this rule for art saves, please do not report art either.\n"
+		"\n"
+		"\boSection R: Other\n"
+		"\bwModerators may interpret these rules as they see fit. Not all rules are equal, some are enforced less than others. Moderators make the final decision on what is and isn't against the rules, but we have made our best effort here to cover all unwanted behavior here. Notice will be posted in this thread whenever the rules are updated.\n"
+		"\n"
+		"Violation of these rules may result in removal of posts / comments, unpublishing or disabling saves, removing saves from front page, or in more extreme cases, a temporary or permanent ban. There are various manual and automated measures in place to enforce these rules. The severity and resulting decisions may not be consistent between moderators.\n"
+		"\n"
+		"If you have any questions about what is and isn't against the rules, feel free to contact a moderator.";
 
 	new InformationMessage("Save Uploading Rules", rules, true);
 }
 
-void ServerSaveActivity::CheckName(std::string newname)
+void ServerSaveActivity::CheckName(String newname)
 {
-	if (newname.length() && newname == save.GetName() && save.GetUserName() == Client::Ref().GetAuthUser().Username)
+	auto user = Client::Ref().GetAuthUser();
+	if (newname.length() && newname == save->GetName() && user && save->GetUserName() == user->Username)
 		titleLabel->SetText("Modify simulation properties:");
 	else
 		titleLabel->SetText("Upload new simulation:");
 }
 
-void ServerSaveActivity::OnTick(float dt)
+void ServerSaveActivity::OnTick()
 {
+	if (thumbnailRenderer)
+	{
+		thumbnailRenderer->Poll();
+		if (thumbnailRenderer->GetDone())
+		{
+			thumbnail = thumbnailRenderer->Finish();
+			thumbnailRenderer = nullptr;
+		}
+	}
+
+	if (uploadSaveRequest && uploadSaveRequest->CheckDone())
+	{
+		okayButton->Enabled = true;
+		try
+		{
+			save->SetID(uploadSaveRequest->Finish());
+			Exit();
+			new SaveIDMessage(save->GetID());
+			if (onUploaded)
+			{
+				onUploaded(std::move(save));
+			}
+		}
+		catch (const http::RequestError &ex)
+		{
+			new ErrorMessage("Error", "Upload failed with error:\n" + ByteString(ex.what()).FromUtf8());
+		}
+		uploadSaveRequest.reset();
+	}
+
 	if(saveUploadTask)
 		saveUploadTask->Poll();
 }
 
 void ServerSaveActivity::OnDraw()
 {
-	Graphics * g = ui::Engine::Ref().g;
-	g->draw_rgba_image(save_to_server_image, -10, 0, 0.7f);
-	g->clearrect(Position.X-2, Position.Y-2, Size.X+3, Size.Y+3);
-	g->drawrect(Position.X, Position.Y, Size.X, Size.Y, 255, 255, 255, 255);
+	Graphics * g = GetGraphics();
+	g->BlendRGBAImage(saveToServerImage->data(), RectSized(Vec2(-10, 0), saveToServerImage->Size()));
+	g->DrawFilledRect(RectSized(Position, Size).Inset(-1), 0x000000_rgb);
+	g->DrawRect(RectSized(Position, Size), 0xFFFFFF_rgb);
 
-	if(Size.X>220)
-		g->draw_line(Position.X+(Size.X/2)-1, Position.Y, Position.X+(Size.X/2)-1, Position.Y+Size.Y-1, 255, 255, 255, 255);
+	if (Size.X > 220)
+		g->DrawLine(Position + Vec2(Size.X / 2 - 1, 0), Position + Vec2(Size.X / 2 - 1, Size.Y - 1), 0xFFFFFF_rgb);
 
-	if(thumbnail)
+	if (thumbnail)
 	{
-		g->draw_image(thumbnail, Position.X+(Size.X/2)+((Size.X/2)-thumbnail->Width)/2, Position.Y+25, 255);
-		g->drawrect(Position.X+(Size.X/2)+((Size.X/2)-thumbnail->Width)/2, Position.Y+25, thumbnail->Width, thumbnail->Height, 180, 180, 180, 255);
+		auto rect = RectSized(Position + Vec2(Size.X / 2 + (Size.X / 2 - thumbnail->Size().X) / 2, 25), thumbnail->Size());
+		g->BlendImage(thumbnail->Data(), 0xFF, rect);
+		g->DrawRect(rect, 0xB4B4B4_rgb);
 	}
-}
-
-void ServerSaveActivity::OnResponseReady(void * imagePtr, int identifier)
-{
-	delete thumbnail;
-	thumbnail = (VideoBuffer *)imagePtr;
 }
 
 ServerSaveActivity::~ServerSaveActivity()
 {
-	RequestBroker::Ref().DetachRequestListener(this);
+	if (thumbnailRenderer)
+	{
+		thumbnailRenderer->Abandon();
+	}
 	delete saveUploadTask;
-	delete callback;
-	delete thumbnail;
 }

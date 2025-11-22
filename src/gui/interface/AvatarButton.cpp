@@ -1,64 +1,66 @@
-#include <iostream>
-#include <typeinfo>
-
+#include "Button.h"
 #include "AvatarButton.h"
 #include "Format.h"
-#include "Engine.h"
-#include "client/Client.h"
-#include "client/requestbroker/RequestBroker.h"
 #include "graphics/Graphics.h"
+#include "graphics/VideoBuffer.h"
 #include "ContextMenu.h"
-#include "Keys.h"
+#include "Config.h"
+#include <iostream>
+#include <SDL.h>
 
 namespace ui {
 
-AvatarButton::AvatarButton(Point position, Point size, std::string username):
+AvatarButton::AvatarButton(Point position, Point size, ByteString username, int avatarSize):
 	Component(position, size),
-	avatar(NULL),
 	name(username),
-	tried(false),
-	actionCallback(NULL)
+	avatarSize(avatarSize),
+	tried(false)
 {
 
 }
 
-AvatarButton::~AvatarButton()
+void AvatarButton::Tick()
 {
-	RequestBroker::Ref().DetachRequestListener(this);
-	delete avatar;
-	delete actionCallback;
-}
-
-void AvatarButton::Tick(float dt)
-{
-	if(!avatar && !tried && name.size() > 0)
+	if (!avatar && !tried && name.size() > 0)
 	{
 		tried = true;
-		RequestBroker::Ref().RetrieveAvatar(name, Size.X, Size.Y, this);
+		ByteStringBuilder urlBuilder;
+		urlBuilder << STATICSERVER << "/avatars/" << name;
+		if (avatarSize)
+		{
+			urlBuilder << "." << avatarSize;
+		}
+		urlBuilder << ".png";
+		imageRequest = std::make_unique<http::ImageRequest>(urlBuilder.Build(), Size);
+		imageRequest->Start();
 	}
-}
 
-void AvatarButton::OnResponseReady(void * imagePtr, int identifier)
-{
-	VideoBuffer * image = (VideoBuffer*)imagePtr;
-	if(image)
+	if (imageRequest && imageRequest->CheckDone())
 	{
-		delete avatar;
-		avatar = image;
+		try
+		{
+			avatar = imageRequest->Finish();
+		}
+		catch (const http::RequestError &ex)
+		{
+			// Nothing, oh well.
+		}
+		imageRequest.reset();
 	}
 }
 
 void AvatarButton::Draw(const Point& screenPos)
 {
-	Graphics * g = ui::Engine::Ref().g;
+	Graphics * g = GetGraphics();
 
-	if(avatar)
+	if (avatar)
 	{
-		g->draw_image(avatar, screenPos.X, screenPos.Y, 255);
+		auto *tex = avatar.get();
+		g->BlendImage(tex->Data(), 255, RectSized(screenPos, tex->Size()));
 	}
 }
 
-void AvatarButton::OnMouseUnclick(int x, int y, unsigned int button)
+void AvatarButton::OnMouseClick(int x, int y, unsigned int button)
 {
 	if(button != 1)
 	{
@@ -77,16 +79,19 @@ void AvatarButton::OnContextMenuAction(int item)
 	//Do nothing
 }
 
-void AvatarButton::OnMouseClick(int x, int y, unsigned int button)
+void AvatarButton::OnMouseDown(int x, int y, unsigned int button)
 {
-	if(button == BUTTON_RIGHT)
+	if (MouseDownInside)
 	{
-		if(menu)
-			menu->Show(GetScreenPos() + ui::Point(x, y));
-	}
-	else
-	{
-		isButtonDown = true;
+		if(button == SDL_BUTTON_RIGHT)
+		{
+			if(menu)
+				menu->Show(GetContainerPos() + ui::Point(x, y));
+		}
+		else
+		{
+			isButtonDown = true;
+		}
 	}
 }
 
@@ -102,13 +107,8 @@ void AvatarButton::OnMouseLeave(int x, int y)
 
 void AvatarButton::DoAction()
 {
-	if(actionCallback)
-		actionCallback->ActionCallback(this);
-}
-
-void AvatarButton::SetActionCallback(AvatarButtonAction * action)
-{
-	actionCallback = action;
+	if( actionCallback.action)
+		actionCallback.action();
 }
 
 } /* namespace ui */

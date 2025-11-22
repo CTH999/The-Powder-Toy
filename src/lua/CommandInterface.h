@@ -1,39 +1,63 @@
-#ifndef COMMANDINTERFACE_H_
-#define COMMANDINTERFACE_H_
-
-#include <string>
-#include "gui/interface/Engine.h"
-//#include "game/GameModel.h"
+#pragma once
+#include "CommandInterfacePtr.h"
+#include "common/ExplicitSingleton.h"
+#include "common/String.h"
+#include "gui/game/GameControllerEvents.h"
+#include "TPTSTypes.h"
+#include <deque>
+#include <optional>
 
 class GameModel;
 class GameController;
 class Tool;
-class CommandInterface {
+
+class CommandInterface : public ExplicitSingleton<CommandInterface>
+{
 protected:
-	std::string lastError;
+	String lastError;
 	GameModel * m;
 	GameController * c;
+
+
+	int PlainCommand(String command);
+	String PlainFormatCommand(String command);
+
 public:
+	CommandInterface(GameController *newGameController, GameModel *newGameModel);
+
 	enum LogType { LogError, LogWarning, LogNotice };
 	enum FormatType { FormatInt, FormatString, FormatChar, FormatFloat, FormatElement };
-	CommandInterface(GameController * c, GameModel * m);
-	int GetPropertyOffset(std::string key, FormatType & format);
-	int GetParticleType(std::string type);
-	void Log(LogType type, std::string message);
+	void Log(LogType type, String message);
 	//void AttachGameModel(GameModel * m);
-	virtual bool OnActiveToolChanged(int toolSelection, Tool * tool) {return true;}
-	virtual bool OnMouseMove(int x, int y, int dx, int dy) {return true;}
-	virtual bool OnMouseDown(int x, int y, unsigned button) {return true;}
-	virtual bool OnMouseUp(int x, int y, unsigned button, char type) {return true;}
-	virtual bool OnMouseWheel(int x, int y, int d) {return true;}
-	virtual bool OnKeyPress(int key, Uint16 character, bool shift, bool ctrl, bool alt) {return true;}
-	virtual bool OnKeyRelease(int key, Uint16 character, bool shift, bool ctrl, bool alt) {return true;}
-	virtual bool OnMouseTick() { return true; }
-	virtual void OnTick() { }
-	virtual int Command(std::string command);
-	virtual std::string FormatCommand(std::string command);
-	std::string GetLastError();
-	virtual ~CommandInterface();
-};
 
-#endif /* COMMANDINTERFACE_H_ */
+	void OnTick();
+	void Init();
+
+	bool HandleEvent(const GameControllerEvent &event);
+	bool HaveSimGraphicsEventHandlers();
+
+	int Command(String command);
+	String FormatCommand(String command);
+	void SetLastError(String err)
+	{
+		lastError = err;
+	}
+	String GetLastError();
+
+	AnyType eval(std::deque<String> * words);
+	int parseNumber(String str);
+	AnyType tptS_set(std::deque<String> * words);
+	AnyType tptS_get(std::deque<String> * words);
+	AnyType tptS_create(std::deque<String> * words);
+	AnyType tptS_delete(std::deque<String> * words);
+	AnyType tptS_load(std::deque<String> * words);
+	AnyType tptS_reset(std::deque<String> * words);
+	AnyType tptS_bubble(std::deque<String> * words);
+	AnyType tptS_quit(std::deque<String> * words);
+	ValueType testType(String word);
+
+	void SetToolIndex(ByteString identifier, std::optional<int> index);
+	void RemoveComponents();
+
+	static CommandInterfacePtr Create(GameController *newGameController, GameModel *newGameModel);
+};

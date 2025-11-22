@@ -1,45 +1,55 @@
-#ifndef PREVIEWMODEL_H
-#define PREVIEWMODEL_H
-
+#pragma once
+#include "common/String.h"
+#include "client/Comment.h"
 #include <vector>
-#include <iostream>
-#include <pthread.h>
-#undef GetUserName //God dammit microsoft!
-#include "PreviewView.h"
-#include "client/SaveInfo.h"
-#include "gui/preview/Comment.h"
-#include "gui/search/Thumbnail.h"
-#include "client/requestbroker/RequestListener.h"
+#include <memory>
+#include <optional>
 
-using namespace std;
+namespace http
+{
+	class GetSaveDataRequest;
+	class GetSaveRequest;
+	class GetCommentsRequest;
+	class FavouriteSaveRequest;
+}
 
 class PreviewView;
-class PreviewModel: RequestListener {
-	bool doOpen;
-	bool canOpen;
-	vector<PreviewView*> observers;
-	SaveInfo * save;
-	std::vector<unsigned char> * saveData;
-	std::vector<SaveComment*> * saveComments;
+class SaveInfo;
+class PreviewModel
+{
+	bool doOpen = false;
+	bool fromUrl = false;
+	bool canOpen = true;
+	std::vector<PreviewView*> observers;
+	std::unique_ptr<SaveInfo> saveInfo;
+	std::optional<std::vector<char>> saveData;
+	std::optional<std::vector<Comment>> saveComments;
 	void notifySaveChanged();
 	void notifySaveCommentsChanged();
 	void notifyCommentsPageChanged();
 	void notifyCommentBoxEnabledChanged();
 
-	//Background retrieval
-	int tSaveID;
-	int tSaveDate;
+	std::unique_ptr<http::GetSaveDataRequest> saveDataDownload;
+	std::unique_ptr<http::GetSaveRequest> saveInfoDownload;
+	std::unique_ptr<http::GetCommentsRequest> commentsDownload;
+	std::unique_ptr<http::FavouriteSaveRequest> favouriteSaveRequest;
+	int saveID;
+	int saveDate;
 
-	//
-	bool commentBoxEnabled;
-	bool commentsLoaded;
-	int commentsTotal;
-	int commentsPageNumber;
+	bool commentBoxEnabled = false;
+	bool commentsLoaded = false;
+	int commentsTotal = 0;
+	int commentsPageNumber = 1;
+
+	std::optional<bool> queuedFavourite;
 
 public:
-	PreviewModel();
-	SaveInfo * GetSave();
-	std::vector<SaveComment*> * GetComments();
+	const SaveInfo *GetSaveInfo() const;
+	std::unique_ptr<SaveInfo> TakeSaveInfo();
+	const std::vector<Comment> *GetComments() const
+	{
+		return saveComments ? &*saveComments : nullptr;
+	}
 
 	bool GetCommentBoxEnabled();
 	void SetCommentBoxEnabled(bool enabledState);
@@ -54,12 +64,12 @@ public:
 	void UpdateSave(int saveID, int saveDate);
 	void SetFavourite(bool favourite);
 	bool GetDoOpen();
+	bool GetFromUrl();
 	bool GetCanOpen();
 	void SetDoOpen(bool doOpen);
+	void SetFromUrl(bool fromUrl);
 	void Update();
-	virtual void OnResponseReady(void * object, int identifier);
-	virtual void OnResponseFailed(int identifier);
-	virtual ~PreviewModel();
+	void OnSaveReady();
+	bool ParseSaveInfo(ByteString &saveInfoResponse);
+	bool ParseComments(ByteString &commentsResponse);
 };
-
-#endif /* PREVIEWMODEL_H */

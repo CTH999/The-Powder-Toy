@@ -1,14 +1,16 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_PSNS PT_PSNS 172
-Element_PSNS::Element_PSNS()
+#include "simulation/ElementCommon.h"
+
+static int update(UPDATE_FUNC_ARGS);
+
+void Element::Element_PSNS()
 {
 	Identifier = "DEFAULT_PT_PSNS";
 	Name = "PSNS";
-	Colour = PIXPACK(0xDB2020);
+	Colour = 0xDB2020_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_SENSOR;
 	Enabled = 1;
-	
+
 	Advection = 0.0f;
 	AirDrag = 0.00f * CFDS;
 	AirLoss = 0.96f;
@@ -18,21 +20,20 @@ Element_PSNS::Element_PSNS()
 	Diffusion = 0.00f;
 	HotAir = 0.000f	* CFDS;
 	Falldown = 0;
-	
+
 	Flammable = 0;
 	Explosive = 0;
 	Meltable = 0;
 	Hardness = 1;
-	
+
 	Weight = 100;
-	
-	Temperature = 277.15f;
+
+	DefaultProperties.temp = 4.0f + 273.15f;
 	HeatConduct = 0;
 	Description = "Pressure sensor, creates a spark when the pressure is greater than its temperature.";
-	
-	State = ST_SOLID;
+
 	Properties = TYPE_SOLID;
-	
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;
@@ -41,40 +42,70 @@ Element_PSNS::Element_PSNS()
 	LowTemperatureTransition = NT;
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
-	
-	Update = &Element_PSNS::update;
-	
+
+	Update = &update;
 }
 
-//#TPT-Directive ElementHeader Element_PSNS static int update(UPDATE_FUNC_ARGS)
-int Element_PSNS::update(UPDATE_FUNC_ARGS)
+static int update(UPDATE_FUNC_ARGS)
 {
-	int r, rx, ry, rt;
-	if (sim->pv[y/CELL][x/CELL] > parts[i].temp-273.15f)
+	auto &sd = SimulationData::CRef();
+	auto &elements = sd.elements;
+	if ((parts[i].tmp == 0 && sim->pv[y/CELL][x/CELL] > parts[i].temp-273.15f) || (parts[i].tmp == 2 && sim->pv[y/CELL][x/CELL] < parts[i].temp-273.15f))
 	{
-		parts[i].life = 0;
-		for (rx=-2; rx<3; rx++)
-			for (ry=-2; ry<3; ry++)
-				if (BOUNDS_CHECK && (rx || ry))
+		for (auto rx = -2; rx <= 2; rx++)
+		{
+			for (auto ry = -2; ry <= 2; ry++)
+			{
+				if (rx || ry)
 				{
-					r = pmap[y+ry][x+rx];
+					auto r = pmap[y+ry][x+rx];
 					if (!r)
 						continue;
-					rt = r&0xFF;
-					if (sim->parts_avg(i,r>>8,PT_INSL) != PT_INSL)
+					auto pavg = sim->parts_avg(i,ID(r),PT_INSL);
+					if (pavg != PT_INSL && pavg != PT_RSSS)
 					{
-						if ((sim->elements[rt].Properties&PROP_CONDUCTS) && !(rt==PT_WATR||rt==PT_SLTW||rt==PT_NTCT||rt==PT_PTCT||rt==PT_INWR) && parts[r>>8].life==0)
+						auto rt = TYP(r);
+						if ((elements[rt].Properties&PROP_CONDUCTS) && !(rt==PT_WATR||rt==PT_SLTW||rt==PT_NTCT||rt==PT_PTCT||rt==PT_INWR) && parts[ID(r)].life==0)
 						{
-							parts[r>>8].life = 4;
-							parts[r>>8].ctype = rt;
-							sim->part_change_type(r>>8,x+rx,y+ry,PT_SPRK);
+							parts[ID(r)].life = 4;
+							parts[ID(r)].ctype = rt;
+							sim->part_change_type(ID(r),x+rx,y+ry,PT_SPRK);
 						}
 					}
 				}
+			}
+		}
+	}
+	if (parts[i].tmp == 1)
+	{
+		bool setFilt = true;
+		float photonWl = sim->pv[y / CELL][x / CELL];
+		if (setFilt)
+		{
+			for (auto rx = -1; rx <= 1; rx++)
+			{
+				for (auto ry = -1; ry <= 1; ry++)
+				{
+					if (rx || ry)
+					{
+						auto r = pmap[y + ry][x + rx];
+						if (!r)
+							continue;
+						auto nx = x + rx;
+						auto ny = y + ry;
+						while (TYP(r) == PT_FILT)
+						{
+							parts[ID(r)].ctype = 0x10000000 + int(round(photonWl) - MIN_PRESSURE);
+							nx += rx;
+							ny += ry;
+							if (nx < 0 || ny < 0 || nx >= XRES || ny >= YRES)
+								break;
+							r = pmap[ny][nx];
+						}
+					}
+				}
+			}
+		}
 	}
 	return 0;
 }
-
-
-
-Element_PSNS::~Element_PSNS() {}

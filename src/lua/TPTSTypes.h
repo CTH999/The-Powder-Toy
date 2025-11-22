@@ -1,22 +1,20 @@
-#ifndef TPTSTYPES_H_
-#define TPTSTYPES_H_
-
-#include <string>
-#include <typeinfo>
+#pragma once
+#include "common/String.h"
 #include "gui/interface/Point.h"
+#include <variant>
 
 enum ValueType { TypeNumber, TypeFloat, TypePoint, TypeString, TypeNull, TypeFunction };
-typedef union { int num; float numf; std::string* str; ui::Point* pt; } ValueValue;
+typedef std::variant<int, float, String, ui::Point> ValueValue;
 
 class GeneralException
 {
 protected:
-	std::string exception;
+	String exception;
 public:
-	GeneralException(std::string message){
+	GeneralException(String message){
 		exception = message;
 	}
-	std::string GetExceptionMessage() {
+	String GetExceptionMessage() {
 		return exception;
 	}
 };
@@ -34,13 +32,12 @@ protected:
 	ValueValue value;
 public:
 	AnyType(ValueType type_, ValueValue value_);
-	AnyType(const AnyType & v);
 	operator NumberType();
 	operator FloatType();
 	operator StringType();
 	operator PointType();
 	ValueType GetType();
-	std::string TypeName()
+	ByteString TypeName()
 	{
 		switch(type)
 		{
@@ -60,7 +57,7 @@ public:
 			return "Unknown";
 		}
 	}
-	static std::string TypeName(ValueType type)
+	static ByteString TypeName(ValueType type)
 	{
 		switch(type)
 		{
@@ -80,17 +77,13 @@ public:
 			return "Unknown";
 		}
 	}
-	~AnyType();
 };
 
 class InvalidConversionException: public GeneralException
 {
-private:
-	ValueType from;
-	ValueType to;
 public:
 	InvalidConversionException(ValueType from_, ValueType to_):
-	GeneralException("Invalid conversion from " + AnyType::TypeName(from_) + " to " + AnyType::TypeName(to_)), from(from_), to(to_) {
+	GeneralException("Invalid conversion from " + AnyType::TypeName(from_).FromAscii() + " to " + AnyType::TypeName(to_).FromAscii()) {
 	}
 };
 
@@ -111,8 +104,8 @@ public:
 class StringType: public AnyType
 {
 public:
-	StringType(std::string string);
-	std::string Value();
+	StringType(String string);
+	String Value();
 };
 
 class PointType: public AnyType
@@ -122,5 +115,3 @@ public:
 	PointType(int pointX, int pointY);
 	ui::Point Value();
 };
-
-#endif /* TPTSTYPES_H_ */

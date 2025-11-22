@@ -1,9 +1,14 @@
-#include <iostream>
 #include "Window.h"
-#include "Keys.h"
+
+#include "Engine.h"
 #include "Component.h"
-#include "gui/interface/Point.h"
 #include "gui/interface/Button.h"
+
+#include "graphics/Graphics.h"
+
+#include "Config.h"
+#include "SimulationConfig.h"
+#include <SDL.h>
 
 using namespace ui;
 
@@ -11,17 +16,17 @@ Window::Window(Point _position, Point _size):
 	Position(_position),
 	Size(_size),
 	AllowExclusiveDrawing(true),
-	okayButton(NULL),
-	cancelButton(NULL),
-	focusedComponent_(NULL),
-	hoverComponent(NULL),
-#ifdef DEBUG
+	DoesTextInput(false),
+	okayButton(nullptr),
+	cancelButton(nullptr),
+	focusedComponent_(nullptr),
+	hoverComponent(nullptr),
 	debugMode(false),
-#endif
 	halt(false),
 	destruct(false),
 	stop(false)
 {
+	SetFps(1);
 }
 
 Window::~Window()
@@ -36,14 +41,19 @@ Window::~Window()
 
 void Window::AddComponent(Component* c)
 {
-	if (c->GetParentWindow() == NULL)
+	if (c->GetParentWindow() == nullptr)
 	{
 		c->SetParentWindow(this);
+		c->MouseInside = false;
+		c->MouseDownInside = false;
 		Components.push_back(c);
 
 		if (Engine::Ref().GetMouseX() > Position.X + c->Position.X && Engine::Ref().GetMouseX() < Position.X + c->Position.X + c->Size.X &&
 			Engine::Ref().GetMouseY() > Position.Y + c->Position.Y && Engine::Ref().GetMouseY() < Position.Y + c->Position.Y + c->Size.Y)
+		{
+			c->MouseInside = true;
 			c->OnMouseEnter(Engine::Ref().GetMouseX() - (Position.X + c->Position.X), Engine::Ref().GetMouseY() - (Position.Y + c->Position.Y));
+		}
 	}
 	else
 	{
@@ -72,13 +82,14 @@ void Window::RemoveComponent(Component* c)
 			//Make sure any events don't continue
 			halt = true;
 			if (Components[i] == focusedComponent_)
-				focusedComponent_ = NULL;
+				focusedComponent_ = nullptr;
 			if (Components[i] == hoverComponent)
-				hoverComponent = NULL;
+				hoverComponent = nullptr;
 
 			Components.erase(Components.begin() + i);
 
 			// we're done
+			c->SetParentWindow(nullptr);
 			return;
 		}
 	}
@@ -101,9 +112,9 @@ void Window::RemoveComponent(unsigned idx)
 	halt = true;
 	// free component and remove it.
 	if (Components[idx] == focusedComponent_)
-		focusedComponent_ = NULL;
+		focusedComponent_ = nullptr;
 	if (Components[idx] == hoverComponent)
-		hoverComponent = NULL;
+		hoverComponent = nullptr;
 	delete Components[idx];
 	Components.erase(Components.begin() + idx);
 }
@@ -115,7 +126,30 @@ bool Window::IsFocused(const Component* c) const
 
 void Window::FocusComponent(Component* c)
 {
-	this->focusedComponent_ = c;
+	if (focusedComponent_ != c)
+	{
+		if (focusedComponent_)
+			focusedComponent_->OnDefocus();
+		this->focusedComponent_ = c;
+		if (c)
+			c->OnFocus();
+	}
+}
+
+void Window::MakeActiveWindow()
+{
+	if (Engine::Ref().GetWindow() != this)
+		Engine::Ref().ShowWindow(this);
+}
+
+void Window::CloseActiveWindow()
+{
+	Engine::Ref().CloseWindowAndEverythingAbove(this);
+}
+
+Graphics * Window::GetGraphics()
+{
+	return Engine::Ref().g;
 }
 
 void Window::DoExit()
@@ -138,101 +172,77 @@ void Window::DoFocus()
 	OnFocus();
 }
 
+void Window::DoFileDrop(ByteString filename)
+{
+	OnFileDrop(filename);
+}
+
 void Window::DoDraw()
 {
 	OnDraw();
-	for (int i = 0, sz = Components.size(); i < sz; ++i)
-		if (Components[i]->Visible && ((Components[i] != focusedComponent_ && Components[i] != hoverComponent) || Components[i]->GetParent()))
+	auto drawChild = [this](Component *child) {
+		if (child->Visible)
 		{
-			Point scrpos(Components[i]->Position.X + Position.X, Components[i]->Position.Y + Position.Y);
-			if (AllowExclusiveDrawing)
-			{
-				Components[i]->Draw(scrpos);
-			}
-			else
-			{
-				if (scrpos.X + Components[i]->Size.X >= 0 &&
-				    scrpos.Y + Components[i]->Size.Y >= 0 &&
-				    scrpos.X < ui::Engine::Ref().GetWidth() &&
-				    scrpos.Y < ui::Engine::Ref().GetHeight())
-				{
-					Components[i]->Draw(scrpos);
-				}
-			}
-#ifdef DEBUG
+			auto rect = RectSized(Position + child->Position, child->Size);
+			if (AllowExclusiveDrawing || bool(rect & GetGraphics()->Size().OriginRect()))
+				child->Draw(rect.pos);
+		}
+	};
+	for (auto child : Components)
+		if ((child != focusedComponent_ && child != hoverComponent) || child->GetParent())
+		{
+			drawChild(child);
+
 			if (debugMode)
-			{
-				if (focusedComponent_==Components[i])
-				{
-					ui::Engine::Ref().g->fillrect(Components[i]->Position.X+Position.X, Components[i]->Position.Y+Position.Y, Components[i]->Size.X, Components[i]->Size.Y, 0, 255, 0, 90);
-				}
-				else
-				{
-					ui::Engine::Ref().g->fillrect(Components[i]->Position.X+Position.X, Components[i]->Position.Y+Position.Y, Components[i]->Size.X, Components[i]->Size.Y, 255, 0, 0, 90);
-				}
-			}
-#endif
+				GetGraphics()->BlendFilledRect(RectSized(Position + child->Position, child->Size),
+					(focusedComponent_ == child ? 0x00FF00_rgb : 0xFF0000_rgb).WithAlpha(0x5A));
 		}
 	// the component the mouse is hovering over and the focused component are always drawn last
-	if (hoverComponent && hoverComponent->Visible && hoverComponent->GetParent() == NULL)
+	if (hoverComponent && hoverComponent->GetParent() == nullptr)
+		drawChild(hoverComponent);
+	if (focusedComponent_ && focusedComponent_ != hoverComponent && focusedComponent_->GetParent() == nullptr)
+		drawChild(focusedComponent_);
+	if (debugMode && focusedComponent_)
 	{
-		Point scrpos(hoverComponent->Position.X + Position.X, hoverComponent->Position.Y + Position.Y);
-		if ((scrpos.X + hoverComponent->Size.X >= 0 &&
-		     scrpos.Y + hoverComponent->Size.Y >= 0 &&
-		     scrpos.X < ui::Engine::Ref().GetWidth() &&
-		     scrpos.Y < ui::Engine::Ref().GetHeight()
-		    ) || AllowExclusiveDrawing)
-		{
-			hoverComponent->Draw(scrpos);
-		}
-	}
-	if (focusedComponent_ && focusedComponent_ != hoverComponent && focusedComponent_->Visible && focusedComponent_->GetParent() == NULL)
-	{
-		Point scrpos(focusedComponent_->Position.X + Position.X, focusedComponent_->Position.Y + Position.Y);
-		if ((scrpos.X + focusedComponent_->Size.X >= 0 &&
-		     scrpos.Y + focusedComponent_->Size.Y >= 0 &&
-		     scrpos.X < ui::Engine::Ref().GetWidth() &&
-		     scrpos.Y < ui::Engine::Ref().GetHeight()
-		    ) || AllowExclusiveDrawing)
-		{
-			focusedComponent_->Draw(scrpos);
-		}
-	}
-#ifdef DEBUG
-	if (debugMode)
-	{
-		if (focusedComponent_)
-		{
-			int xPos = focusedComponent_->Position.X+focusedComponent_->Size.X+5+Position.X;
-			Graphics * g = ui::Engine::Ref().g;
-			char tempString[512];
-			char tempString2[512];
-			
-			sprintf(tempString, "Position: L %d, R %d, T: %d, B: %d", focusedComponent_->Position.X, Size.X-(focusedComponent_->Position.X+focusedComponent_->Size.X), focusedComponent_->Position.Y, Size.Y-(focusedComponent_->Position.Y+focusedComponent_->Size.Y));
-			sprintf(tempString2, "Size: %d, %d", focusedComponent_->Size.X, focusedComponent_->Size.Y);
-			
-			if (Graphics::textwidth(tempString)+xPos > WINDOWW)
-				xPos = WINDOWW-(Graphics::textwidth(tempString)+5);
-			if (Graphics::textwidth(tempString2)+xPos > WINDOWW)
-				xPos = WINDOWW-(Graphics::textwidth(tempString2)+5);
-			
-			g->drawtext(xPos, focusedComponent_->Position.Y+Position.Y+1, tempString, 0, 0, 0, 200);
-			g->drawtext(xPos, focusedComponent_->Position.Y+Position.Y, tempString, 255, 255, 255, 255);
-			g->drawtext(xPos, focusedComponent_->Position.Y+Position.Y+13, tempString2, 0, 0, 0, 200);
-			g->drawtext(xPos, focusedComponent_->Position.Y+Position.Y+12, tempString2, 255, 255, 255, 255);
-		}
-		return;
-	}
-#endif
+		Graphics *g = ui::Engine::Ref().g;
 
+		auto invPos = Size - (focusedComponent_->Position + focusedComponent_->Size);
+		String posText = String::Build(
+			"Position: L ", focusedComponent_->Position.X,
+			", R ", invPos.X,
+			", T: ", focusedComponent_->Position.Y,
+			", B: ", invPos.Y
+		);
+		String sizeText = String::Build(
+			"Size: ", focusedComponent_->Size.X,
+			", ", focusedComponent_->Size.Y
+		);
+
+		auto pos = focusedComponent_->Position + Position + Vec2(focusedComponent_->Size.X + 5, 0);
+		pos.X = std::min(pos.X, g->Size().X - (Graphics::TextSize(posText).X - 1) - 5);
+		pos.X = std::min(pos.X, g->Size().X - (Graphics::TextSize(sizeText).X - 1) - 5);
+
+		g->BlendText(pos + Vec2(0, 1), posText, 0x000000_rgb .WithAlpha(0xC8));
+		g->BlendText(pos + Vec2(0, 0), posText, 0xFFFFFF_rgb .WithAlpha(0xFF));
+		g->BlendText(pos + Vec2(0, 13), sizeText, 0x000000_rgb .WithAlpha(0xC8));
+		g->BlendText(pos + Vec2(0, 12), sizeText, 0xFFFFFF_rgb .WithAlpha(0xFF));
+	}
 }
 
-void Window::DoTick(float dt)
+void Window::DoTick()
 {
-#ifdef DEBUG
 	if (debugMode)
 		return;
-#endif
+
+	if (DoesTextInput || (focusedComponent_ && focusedComponent_->Visible && focusedComponent_->Enabled && focusedComponent_->DoesTextInput))
+	{
+		ui::Engine::Ref().StartTextInput();
+	}
+	else
+	{
+		ui::Engine::Ref().StopTextInput();
+	}
+
 	//on mouse hover
 	for (int i = Components.size() - 1; i >= 0 && !halt; --i)
 	{
@@ -250,61 +260,65 @@ void Window::DoTick(float dt)
 	//tick
 	for (int i = 0, sz = Components.size(); i < sz && !halt; ++i)
 	{
-		Components[i]->Tick(dt);
+		Components[i]->Tick();
 	}
 
 	halt = false;
 	stop = false;
 
-	OnTick(dt);
+	OnTick();
 
 	if (destruct)
 		finalise();
 }
 
-void Window::DoKeyPress(int key, Uint16 character, bool shift, bool ctrl, bool alt)
+void Window::DoSimTick()
 {
-#ifdef DEBUG
-	if (key == KEY_TAB && ctrl)
+	OnSimTick();
+}
+
+void Window::DoKeyPress(int key, int scan, bool repeat, bool shift, bool ctrl, bool alt)
+{
+	if (DEBUG && key == SDLK_TAB && ctrl)
 		debugMode = !debugMode;
 	if (debugMode)
 	{
-		if (focusedComponent_!=NULL)
+		if (focusedComponent_!=nullptr)
 		{
 			if (shift)
 			{
-				if (key == KEY_UP)
+				if (key == SDLK_UP)
 					focusedComponent_->Size.Y--;
-				if (key == KEY_DOWN)
+				if (key == SDLK_DOWN)
 					focusedComponent_->Size.Y++;
-				if (key == KEY_LEFT)
+				if (key == SDLK_LEFT)
 					focusedComponent_->Size.X--;
-				if (key == KEY_RIGHT)
+				if (key == SDLK_RIGHT)
 					focusedComponent_->Size.X++;
 			}
 			if (ctrl)
 			{
-				if (key == KEY_UP)
+				if (key == SDLK_UP)
 					focusedComponent_->Size.Y++;
-				if (key == KEY_DOWN)
+				if (key == SDLK_DOWN)
 					focusedComponent_->Size.Y--;
-				if (key == KEY_LEFT)
+				if (key == SDLK_LEFT)
 					focusedComponent_->Size.X++;
-				if (key == KEY_RIGHT)
+				if (key == SDLK_RIGHT)
 					focusedComponent_->Size.X--;
 			}
 			if (!shift)
 			{
-				if (key == KEY_UP)
+				if (key == SDLK_UP)
 					focusedComponent_->Position.Y--;
-				if (key == KEY_DOWN)
+				if (key == SDLK_DOWN)
 					focusedComponent_->Position.Y++;
-				if (key == KEY_LEFT)
+				if (key == SDLK_LEFT)
 					focusedComponent_->Position.X--;
-				if (key == KEY_RIGHT)
+				if (key == SDLK_RIGHT)
 					focusedComponent_->Position.X++;
 			}
-			if (key == KEY_DELETE)
+			if (key == SDLK_DELETE)
 			{
 				RemoveComponent(focusedComponent_);
 				halt = false;
@@ -314,79 +328,108 @@ void Window::DoKeyPress(int key, Uint16 character, bool shift, bool ctrl, bool a
 		{
 			if (shift)
 			{
-				if (key == KEY_UP)
+				if (key == SDLK_UP)
 					Size.Y--;
-				if (key == KEY_DOWN)
+				if (key == SDLK_DOWN)
 					Size.Y++;
-				if (key == KEY_LEFT)
+				if (key == SDLK_LEFT)
 					Size.X--;
-				if (key == KEY_RIGHT)
+				if (key == SDLK_RIGHT)
 					Size.X++;
 			}
 			if (ctrl)
 			{
-				if (key == KEY_UP)
+				if (key == SDLK_UP)
 					Size.Y++;
-				if (key == KEY_DOWN)
+				if (key == SDLK_DOWN)
 					Size.Y--;
-				if (key == KEY_LEFT)
+				if (key == SDLK_LEFT)
 					Size.X++;
-				if (key == KEY_RIGHT)
+				if (key == SDLK_RIGHT)
 					Size.X--;
 			}
 			if (!shift)
 			{
-				if (key == KEY_UP)
+				if (key == SDLK_UP)
 					Position.Y--;
-				if (key == KEY_DOWN)
+				if (key == SDLK_DOWN)
 					Position.Y++;
-				if( key == KEY_LEFT)
+				if( key == SDLK_LEFT)
 					Position.X--;
-				if (key == KEY_RIGHT)
+				if (key == SDLK_RIGHT)
 					Position.X++;
 			}
 		}
 		return;
 	}
-#endif
 	//on key press
-	if (focusedComponent_ != NULL)
+	if (focusedComponent_ != nullptr)
 	{
 		if (focusedComponent_->Enabled && focusedComponent_->Visible)
-			focusedComponent_->OnKeyPress(key, character, shift, ctrl, alt);
+			focusedComponent_->OnKeyPress(key, scan, repeat, shift, ctrl, alt);
 	}
 
 	if (!stop)
-		OnKeyPress(key, character, shift, ctrl, alt);
-	
-	if (key == KEY_ESCAPE)
+		OnKeyPress(key, scan, repeat, shift, ctrl, alt);
+
+	if (key == SDLK_ESCAPE || key == SDLK_AC_BACK)
 		OnTryExit(Escape);
 
-	if (key == KEY_ENTER || key == KEY_RETURN)
+	if (key == SDLK_KP_ENTER || key == SDLK_RETURN)
 		OnTryOkay(Enter);
 
 	if (destruct)
 		finalise();
 }
 
-void Window::DoKeyRelease(int key, Uint16 character, bool shift, bool ctrl, bool alt)
+void Window::DoKeyRelease(int key, int scan, bool repeat, bool shift, bool ctrl, bool alt)
 {
-#ifdef DEBUG
 	if(debugMode)
 		return;
-#endif
 	//on key unpress
-	if (focusedComponent_ != NULL)
+	if (focusedComponent_ != nullptr)
 	{
 		if (focusedComponent_->Enabled && focusedComponent_->Visible)
-			focusedComponent_->OnKeyRelease(key, character, shift, ctrl, alt);
+			focusedComponent_->OnKeyRelease(key, scan, repeat, shift, ctrl, alt);
 	}
 
 	if (!stop)
-		OnKeyRelease(key, character, shift, ctrl, alt);
+		OnKeyRelease(key, scan, repeat, shift, ctrl, alt);
 	if (destruct)
 		finalise();
 }
+
+void Window::DoTextInput(String text)
+{
+	if (debugMode)
+		return;
+	//on key unpress
+	if (focusedComponent_ != nullptr)
+	{
+		if (focusedComponent_->Enabled && focusedComponent_->Visible)
+			focusedComponent_->OnTextInput(text);
+	}
+
+	if (!stop)
+		OnTextInput(text);
+	if (destruct)
+		finalise();
+}
+
+void Window::DoTextEditing(String text)
+{
+	if (focusedComponent_ != nullptr)
+	{
+		if (focusedComponent_->Enabled && focusedComponent_->Visible)
+			focusedComponent_->OnTextEditing(text);
+	}
+
+	if (!stop)
+		OnTextEditing(text);
+	if (destruct)
+		finalise();
+}
+
 
 void Window::DoMouseDown(int x_, int y_, unsigned button)
 {
@@ -401,10 +444,10 @@ void Window::DoMouseDown(int x_, int y_, unsigned button)
 			if (x >= Components[i]->Position.X && y >= Components[i]->Position.Y && x < Components[i]->Position.X + Components[i]->Size.X && y < Components[i]->Position.Y + Components[i]->Size.Y)
 			{
 				FocusComponent(Components[i]);
-#ifdef DEBUG
-				if (!debugMode)
-#endif
-				Components[i]->OnMouseClick(x - Components[i]->Position.X, y - Components[i]->Position.Y, button);
+				if (!DEBUG || !debugMode)
+				{
+					Components[i]->MouseDownInside = true;
+				}
 				clickState = true;
 				break;
 			}
@@ -412,12 +455,10 @@ void Window::DoMouseDown(int x_, int y_, unsigned button)
 	}
 
 	if (!clickState)
-		FocusComponent(NULL);
-	
-#ifdef DEBUG
+		FocusComponent(nullptr);
+
 	if (debugMode)
 		return;
-#endif
 
 	//on mouse down
 	for (int i = Components.size() - 1; i > -1 && !halt; --i)
@@ -441,10 +482,8 @@ void Window::DoMouseMove(int x_, int y_, int dx, int dy)
 	//on mouse move (if true, and inside)
 	int x = x_ - Position.X;
 	int y = y_ - Position.Y;
-#ifdef DEBUG
 	if (debugMode)
 		return;
-#endif
 	for (int i = Components.size() - 1; i > -1  && !halt; --i)
 	{
 		if (Components[i]->Enabled && Components[i]->Visible)
@@ -452,21 +491,17 @@ void Window::DoMouseMove(int x_, int y_, int dx, int dy)
 			Point local(x - Components[i]->Position.X, y - Components[i]->Position.Y);
 			Point a(local.X - dx, local.Y - dy);
 
-			Components[i]->OnMouseMoved(local.X, local.Y, dx, dy);
+			Components[i]->OnMouseMoved(local.X, local.Y);
 
 			if (local.X >= 0 &&
 			    local.Y >= 0 &&
 			    local.X < Components[i]->Size.X &&
 			    local.Y < Components[i]->Size.Y && !halt)
 			{
-				Components[i]->OnMouseMovedInside(local.X, local.Y, dx, dy);
-
 				// entering?
-				if (!(a.X >= 0 &&
-				      a.Y >= 0 &&
-				      a.X < Components[i]->Size.X &&
-				      a.Y < Components[i]->Size.Y ))
+				if (!Components[i]->MouseInside)
 				{
+					Components[i]->MouseInside = true;
 					Components[i]->OnMouseEnter(local.X, local.Y);
 				}
 				if (Components[i]->Enabled)
@@ -475,11 +510,9 @@ void Window::DoMouseMove(int x_, int y_, int dx, int dy)
 			else if (!halt)
 			{
 				// leaving?
-				if (a.X >= 0 &&
-					a.Y >= 0 &&
-					a.X < Components[i]->Size.X &&
-					a.Y < Components[i]->Size.Y )
+				if (Components[i]->MouseInside)
 				{
+					Components[i]->MouseInside = false;
 					Components[i]->OnMouseLeave(local.X, local.Y);
 				}
 
@@ -497,21 +530,23 @@ void Window::DoMouseUp(int x_, int y_, unsigned button)
 {
 	int x = x_ - Position.X;
 	int y = y_ - Position.Y;
-#ifdef DEBUG
 	if (debugMode)
 		return;
-#endif
 	//on mouse unclick
 	for (int i = Components.size() - 1; i >= 0  && !halt; --i)
 	{
 		if (Components[i]->Enabled && Components[i]->Visible)
 		{
-			if (x >= Components[i]->Position.X && y >= Components[i]->Position.Y && x < Components[i]->Position.X + Components[i]->Size.X && y < Components[i]->Position.Y + Components[i]->Size.Y)
+			if (Components[i]->MouseDownInside && x >= Components[i]->Position.X && y >= Components[i]->Position.Y && x < Components[i]->Position.X + Components[i]->Size.X && y < Components[i]->Position.Y + Components[i]->Size.Y)
 			{
-				Components[i]->OnMouseUnclick(x - Components[i]->Position.X, y - Components[i]->Position.Y, button);
+				Components[i]->OnMouseClick(x - Components[i]->Position.X, y - Components[i]->Position.Y, button);
 				break;
 			}
 		}
+	}
+	for (auto *component : Components)
+	{
+		component->MouseDownInside = false;
 	}
 
 	//on mouse up
@@ -531,10 +566,8 @@ void Window::DoMouseWheel(int x_, int y_, int d)
 {
 	int x = x_ - Position.X;
 	int y = y_ - Position.Y;
-#ifdef DEBUG
 	if (debugMode)
 		return;
-#endif
 	//on mouse wheel focused
 	for (int i = Components.size() - 1; i >= 0  && !halt; --i)
 	{
@@ -578,3 +611,12 @@ void Window::Halt()
 	halt = true;
 }
 
+void Window::SetFps(float newFps)
+{
+	fps = newFps;
+}
+
+void Window::SetFpsLimit(FpsLimit newFpsLimit)
+{
+	fpsLimit = newFpsLimit;
+}
