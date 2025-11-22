@@ -1,18 +1,15 @@
-#ifndef GAMEMODELEXCEPTION_H_
-#define GAMEMODELEXCEPTION_H_
-
+#pragma once
 #include "common/String.h"
 #include <exception>
 
-struct GameModelException: public exception {
-	String message;
+struct GameModelException: public std::exception
+{
+	ByteString message;
 public:
-	GameModelException(String message_): message(message_) {}
-	const char * what() const throw()
+	GameModelException(String message_): message(message_.ToUtf8()) {}
+	const char * what() const throw() override
 	{
-		return message.ToUtf8().c_str();
+		return message.c_str();
 	}
-	~GameModelException() throw() {};
+	~GameModelException() throw() {}
 };
-
-#endif /* GAMEMODELEXCEPTION_H_ */

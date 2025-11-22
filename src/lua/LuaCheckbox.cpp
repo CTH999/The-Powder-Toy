@@ -1,11 +1,8 @@
-#ifdef LUACONSOLE
-
-#include <iostream>
 #include "LuaCheckbox.h"
 #include "LuaScriptInterface.h"
 #include "gui/interface/Checkbox.h"
 
-const char LuaCheckbox::className[] = "Checkbox";
+const char LuaCheckbox::className[] = "checkbox";
 
 #define method(class, name) {#name, &class::name}
 Luna<LuaCheckbox>::RegType LuaCheckbox::methods[] = {
@@ -15,75 +12,54 @@ Luna<LuaCheckbox>::RegType LuaCheckbox::methods[] = {
 	method(LuaCheckbox, size),
 	method(LuaCheckbox, visible),
 	method(LuaCheckbox, checked),
-	{0, 0}
+	{nullptr, nullptr}
 };
 
-LuaCheckbox::LuaCheckbox(lua_State * l) :
-	LuaComponent(l),
-	actionFunction(0)
+LuaCheckbox::LuaCheckbox(lua_State *L) :
+	LuaComponent(L)
 {
-	int posX = luaL_optinteger(l, 1, 0);
-	int posY = luaL_optinteger(l, 2, 0);
-	int sizeX = luaL_optinteger(l, 3, 10);
-	int sizeY = luaL_optinteger(l, 4, 10);
-	String text = ByteString(luaL_optstring(l, 5, "")).FromUtf8();
+	int posX = luaL_optinteger(L, 1, 0);
+	int posY = luaL_optinteger(L, 2, 0);
+	int sizeX = luaL_optinteger(L, 3, 10);
+	int sizeY = luaL_optinteger(L, 4, 10);
+	String text = tpt_lua_optString(L, 5, "");
 
 	checkbox = new ui::Checkbox(ui::Point(posX, posY), ui::Point(sizeX, sizeY), text, "");
 	component = checkbox;
-	class ClickAction : public ui::CheckboxAction
-	{
-		LuaCheckbox * luaCheckbox;
-	public:
-		ClickAction(LuaCheckbox * luaCheckbox) : luaCheckbox(luaCheckbox) {}
-		void ActionCallback(ui::Checkbox * sender)
-		{
-			luaCheckbox->triggerAction();
-		}
-	};
-	checkbox->SetActionCallback(new ClickAction(this));
+	checkbox->SetActionCallback({ [this] { triggerAction(); } });
 }
 
-int LuaCheckbox::checked(lua_State * l)
+int LuaCheckbox::checked(lua_State *L)
 {
-	int args = lua_gettop(l);
+	int args = lua_gettop(L);
 	if(args)
 	{
-		checkbox->SetChecked(lua_toboolean(l, 1));
+		checkbox->SetChecked(lua_toboolean(L, 1));
 		return 0;
 	}
 	else
 	{
-		lua_pushboolean(l, checkbox->GetChecked());
+		lua_pushboolean(L, checkbox->GetChecked());
 		return 1;
 	}
 }
 
-int LuaCheckbox::action(lua_State * l)
+int LuaCheckbox::action(lua_State *L)
 {
-	if(lua_type(l, 1) != LUA_TNIL)
-	{
-		luaL_checktype(l, 1, LUA_TFUNCTION);
-		lua_pushvalue(l, 1);
-		actionFunction = luaL_ref(l, LUA_REGISTRYINDEX);
-	}
-	else
-	{
-		actionFunction = 0;
-	}
-	return 0;
+	return actionFunction.CheckAndAssignArg1(L);
 }
 
-int LuaCheckbox::text(lua_State * l)
+int LuaCheckbox::text(lua_State *L)
 {
-	int args = lua_gettop(l);
+	int args = lua_gettop(L);
 	if(args)
 	{
-		checkbox->SetText(ByteString(lua_tostring(l, 1)).FromUtf8());
+		checkbox->SetText(tpt_lua_checkString(L, 1));
 		return 0;
 	}
 	else
 	{
-		lua_pushstring(l, checkbox->GetText().ToUtf8().c_str());
+		tpt_lua_pushString(L, checkbox->GetText());
 		return 1;
 	}
 }
@@ -92,12 +68,12 @@ void LuaCheckbox::triggerAction()
 {
 	if(actionFunction)
 	{
-		lua_rawgeti(l, LUA_REGISTRYINDEX, actionFunction);
-		lua_rawgeti(l, LUA_REGISTRYINDEX, UserData);
-		lua_pushboolean(l, checkbox->GetChecked());
-		if (lua_pcall(l, 2, 0, 0))
+		lua_rawgeti(L, LUA_REGISTRYINDEX, actionFunction);
+		lua_rawgeti(L, LUA_REGISTRYINDEX, owner_ref);
+		lua_pushboolean(L, checkbox->GetChecked());
+		if (tpt_lua_pcall(L, 2, 0, 0, eventTraitInterface))
 		{
-			ci->Log(CommandInterface::LogError, ByteString(lua_tostring(l, -1)).FromUtf8());
+			ci->Log(CommandInterface::LogError, tpt_lua_toString(L, -1));
 		}
 	}
 }
@@ -105,4 +81,3 @@ void LuaCheckbox::triggerAction()
 LuaCheckbox::~LuaCheckbox()
 {
 }
-#endif

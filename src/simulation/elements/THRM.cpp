@@ -1,10 +1,10 @@
-#include "simulation/Elements.h"
-//#TPT-Directive ElementClass Element_THRM PT_THRM 65
-Element_THRM::Element_THRM()
+#include "simulation/ElementCommon.h"
+
+void Element::Element_THRM()
 {
 	Identifier = "DEFAULT_PT_THRM";
 	Name = "THRM";
-	Colour = PIXPACK(0xA08090);
+	Colour = 0xA08090_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_EXPLOSIVE;
 	Enabled = 1;
@@ -26,9 +26,8 @@ Element_THRM::Element_THRM()
 
 	Weight = 90;
 
-	Temperature = R_TEMP+0.0f	+273.15f;
 	HeatConduct = 211;
-	Description = "Thermite. Burns at extremely high temperature.";
+	Description = "Thermite. Burns into extremely hot molten metal.";
 
 	Properties = TYPE_PART;
 
@@ -40,8 +39,4 @@ Element_THRM::Element_THRM()
 	LowTemperatureTransition = NT;
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
-
-	Update = NULL;
 }
-
-Element_THRM::~Element_THRM() {}

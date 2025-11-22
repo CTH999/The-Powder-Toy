@@ -1,13 +1,13 @@
-#include <algorithm>
-#include <functional>
-#include "simulation/Elements.h"
+#include "simulation/ElementCommon.h"
 #include "simulation/Air.h"
-//#TPT-Directive ElementClass Element_HEAC PT_HEAC 180
-Element_HEAC::Element_HEAC()
+
+static int update(UPDATE_FUNC_ARGS);
+
+void Element::Element_HEAC()
 {
 	Identifier = "DEFAULT_PT_HEAC";
 	Name = "HEAC";
-	Colour = PIXPACK(0xCB6351);
+	Colour = 0xCB6351_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_SOLIDS;
 	Enabled = 1;
@@ -29,7 +29,6 @@ Element_HEAC::Element_HEAC()
 
 	Weight = 100;
 
-	Temperature = R_TEMP+273.15f;
 	HeatConduct = 251;
 	Description = "Rapid heat conductor.";
 
@@ -45,23 +44,12 @@ Element_HEAC::Element_HEAC()
 	HighTemperature = 1887.15f;
 	HighTemperatureTransition = NT;
 
-	Update = &Element_HEAC::update;
+	Update = &update;
 }
 
-//#TPT-Directive ElementHeader Element_HEAC struct IsInsulator
-struct Element_HEAC::IsInsulator : public std::binary_function<Simulation*,int,bool> {
-  bool operator() (Simulation* a, int b)
-  {
-	  return b && (a->elements[TYP(b)].HeatConduct == 0 || (TYP(b) == PT_HSWC && a->parts[ID(b)].life != 10));
-  }
-};
-//#TPT-Directive ElementHeader Element_HEAC static IsInsulator isInsulator
-Element_HEAC::IsInsulator Element_HEAC::isInsulator = Element_HEAC::IsInsulator();
-
 // If this is used elsewhere (GOLD), it should be moved into Simulation.h
-//#TPT-Directive ElementHeader Element_HEAC template<class BinaryPredicate> static bool CheckLine(Simulation* sim, int x1, int y1, int x2, int y2, BinaryPredicate func)
 template<class BinaryPredicate>
-bool Element_HEAC::CheckLine(Simulation* sim, int x1, int y1, int x2, int y2, BinaryPredicate func)
+bool CheckLine(Simulation* sim, int x1, int y1, int x2, int y2, BinaryPredicate func)
 {
 	bool reverseXY = abs(y2-y1) > abs(x2-x1);
 	int x, y, dx, dy, sy;
@@ -124,9 +112,9 @@ bool Element_HEAC::CheckLine(Simulation* sim, int x1, int y1, int x2, int y2, Bi
 	return false;
 }
 
-//#TPT-Directive ElementHeader Element_HEAC static int update(UPDATE_FUNC_ARGS)
-int Element_HEAC::update(UPDATE_FUNC_ARGS)
+static int update(UPDATE_FUNC_ARGS)
 {
+	auto &sd = SimulationData::CRef();
 	const int rad = 4;
 	int rry, rrx, r, count = 0;
 	float tempAgg = 0;
@@ -136,16 +124,18 @@ int Element_HEAC::update(UPDATE_FUNC_ARGS)
 		{
 			rry = ry * rad;
 			rrx = rx * rad;
-			if (x+rrx >= 0 && x+rrx < XRES && y+rry >= 0 && y+rry < YRES && !Element_HEAC::CheckLine<Element_HEAC::IsInsulator>(sim, x, y, x+rrx, y+rry, isInsulator))
+			if (x+rrx >= 0 && x+rrx < XRES && y+rry >= 0 && y+rry < YRES && !CheckLine(sim, x, y, x+rrx, y+rry, [&sd](Simulation* sim, int p) {
+				return p && sd.IsHeatInsulator(sim->parts[ID(p)]);
+			}))
 			{
 				r = pmap[y+rry][x+rrx];
-				if (r && sim->elements[TYP(r)].HeatConduct > 0 && (TYP(r) != PT_HSWC || parts[ID(r)].life == 10))
+				if (r && !sd.IsHeatInsulator(parts[ID(r)]))
 				{
 					count++;
 					tempAgg += parts[ID(r)].temp;
 				}
 				r = sim->photons[y+rry][x+rrx];
-				if (r && sim->elements[TYP(r)].HeatConduct > 0 && (TYP(r) != PT_HSWC || parts[ID(r)].life == 10))
+				if (r && !sd.IsHeatInsulator(parts[ID(r)]))
 				{
 					count++;
 					tempAgg += parts[ID(r)].temp;
@@ -164,15 +154,17 @@ int Element_HEAC::update(UPDATE_FUNC_ARGS)
 			{
 				rry = ry * rad;
 				rrx = rx * rad;
-				if (x+rrx >= 0 && x+rrx < XRES && y+rry >= 0 && y+rry < YRES && !Element_HEAC::CheckLine<Element_HEAC::IsInsulator>(sim, x, y, x+rrx, y+rry, isInsulator))
+				if (x+rrx >= 0 && x+rrx < XRES && y+rry >= 0 && y+rry < YRES && !CheckLine(sim, x, y, x+rrx, y+rry, [&sd](Simulation* sim, int p) {
+					return p && sd.IsHeatInsulator(sim->parts[ID(p)]);
+				}))
 				{
 					r = pmap[y+rry][x+rrx];
-					if (r && sim->elements[TYP(r)].HeatConduct > 0 && (TYP(r) != PT_HSWC || parts[ID(r)].life == 10))
+					if (r && !sd.IsHeatInsulator(parts[ID(r)]))
 					{
 						parts[ID(r)].temp = parts[i].temp;
 					}
 					r = sim->photons[y+rry][x+rrx];
-					if (r && sim->elements[TYP(r)].HeatConduct > 0 && (TYP(r) != PT_HSWC || parts[ID(r)].life == 10))
+					if (r && !sd.IsHeatInsulator(parts[ID(r)]))
 					{
 						parts[ID(r)].temp = parts[i].temp;
 					}
@@ -183,6 +175,3 @@ int Element_HEAC::update(UPDATE_FUNC_ARGS)
 
 	return 0;
 }
-
-
-Element_HEAC::~Element_HEAC() {}

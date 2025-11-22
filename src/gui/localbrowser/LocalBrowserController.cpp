@@ -1,14 +1,22 @@
-#include "client/Client.h"
 #include "LocalBrowserController.h"
-#include "gui/interface/Engine.h"
-#include "gui/dialogues/ConfirmPrompt.h"
-#include "tasks/TaskWindow.h"
-#include "tasks/Task.h"
 
 #include "LocalBrowserModel.h"
 #include "LocalBrowserView.h"
 
-LocalBrowserController::LocalBrowserController(ControllerCallback * callback):
+#include "client/Client.h"
+#include "client/GameSave.h"
+#include "client/SaveFile.h"
+#include "gui/dialogues/ConfirmPrompt.h"
+#include "gui/dialogues/TextPrompt.h"
+#include "gui/dialogues/ErrorMessage.h"
+#include "tasks/TaskWindow.h"
+#include "tasks/Task.h"
+
+#include "Controller.h"
+
+#include <algorithm>
+
+LocalBrowserController::LocalBrowserController(std::function<void ()> onDone_):
 	HasDone(false)
 {
 	browserModel = new LocalBrowserModel();
@@ -16,40 +24,29 @@ LocalBrowserController::LocalBrowserController(ControllerCallback * callback):
 	browserView->AttachController(this);
 	browserModel->AddObserver(browserView);
 
-	this->callback = callback;
+	onDone = onDone_;
 
-	browserModel->UpdateSavesList(1);
+	browserModel->UpdateSavesList(0);
 }
 
-void LocalBrowserController::OpenSave(SaveFile * save)
+void LocalBrowserController::OpenSave(int index)
 {
-	browserModel->SetSave(save);
+	browserModel->OpenSave(index);
 }
 
-SaveFile * LocalBrowserController::GetSave()
+std::unique_ptr<SaveFile> LocalBrowserController::TakeSave()
 {
-	return browserModel->GetSave();
+	return browserModel->TakeSave();
 }
 
 void LocalBrowserController::RemoveSelected()
 {
-	class RemoveSelectedConfirmation: public ConfirmDialogueCallback {
-	public:
-		LocalBrowserController * c;
-		RemoveSelectedConfirmation(LocalBrowserController * c_) {	c = c_;	}
-		virtual void ConfirmCallback(ConfirmPrompt::DialogueResult result) {
-			if (result == ConfirmPrompt::ResultOkay)
-				c->removeSelectedC();
-		}
-		virtual ~RemoveSelectedConfirmation() { }
-	};
-
 	StringBuilder desc;
 	desc << "Are you sure you want to delete " << browserModel->GetSelected().size() << " stamp";
 	if(browserModel->GetSelected().size()>1)
 		desc << "s";
 	desc << "?";
-	new ConfirmPrompt("Delete stamps", desc.Build(), new RemoveSelectedConfirmation(this));
+	new ConfirmPrompt("Delete stamps", desc.Build(), { [this] { removeSelectedC(); } });
 }
 
 void LocalBrowserController::removeSelectedC()
@@ -60,19 +57,18 @@ void LocalBrowserController::removeSelectedC()
 		LocalBrowserController * c;
 	public:
 		RemoveSavesTask(LocalBrowserController * c, std::vector<ByteString> saves_) : c(c) { saves = saves_; }
-		virtual bool doWork()
+		bool doWork() override
 		{
 			for (size_t i = 0; i < saves.size(); i++)
 			{
 				notifyStatus(String::Build("Deleting stamp [", saves[i].FromUtf8(), "] ..."));
 				Client::Ref().DeleteStamp(saves[i]);
-				notifyProgress((float(i+1)/float(saves.size())*100));
+				notifyProgress((i + 1) * 100 / saves.size());
 			}
 			return true;
 		}
-		virtual void after()
+		void after() override
 		{
-			Client::Ref().updateStamps();
 			c->RefreshSavesList();
 		}
 	};
@@ -81,24 +77,24 @@ void LocalBrowserController::removeSelectedC()
 	new TaskWindow("Removing stamps", new RemoveSavesTask(this, selected));
 }
 
-void LocalBrowserController::RescanStamps()
+void LocalBrowserController::RenameSelected()
 {
-	class RescanConfirmation: public ConfirmDialogueCallback {
-	public:
-		LocalBrowserController * c;
-		RescanConfirmation(LocalBrowserController * c_) {	c = c_;	}
-		virtual void ConfirmCallback(ConfirmPrompt::DialogueResult result) {
-			if (result == ConfirmPrompt::ResultOkay)
-				c->rescanStampsC();
-		}
-		virtual ~RescanConfirmation() { }
-	};
+	ByteString save = browserModel->GetSelected()[0];
 
-	String desc = "Rescanning the stamps folder can find stamps added to the stamps folder or recover stamps when the stamps.def file has been lost or damaged. However, be warned that this will mess up the current sorting order";
-	new ConfirmPrompt("Rescan", desc, new RescanConfirmation(this));
+	new TextPrompt("Rename stamp", "Enter a new name for the stamp:", "", "[new name]", false, { [this, save](const String &newName) {
+		if (newName.length() == 0)
+		{
+			new ErrorMessage("Error renaming stamp", "You have to specify the filename.");
+			return;
+		}
+
+		Client::Ref().RenameStamp(save, newName.ToUtf8());
+
+		RefreshSavesList();
+	} });
 }
 
-void LocalBrowserController::rescanStampsC()
+void LocalBrowserController::RescanStamps()
 {
 	browserModel->RescanStamps();
 	browserModel->UpdateSavesList(browserModel->GetPageNum());
@@ -117,20 +113,20 @@ void LocalBrowserController::ClearSelection()
 
 void LocalBrowserController::SetPage(int page)
 {
-	if (page != browserModel->GetPageNum() && page > 0 && page <= browserModel->GetPageCount())
+	if (page != browserModel->GetPageNum() && page >= 0 && page < browserModel->GetPageCount())
 		browserModel->UpdateSavesList(page);
 }
 
 void LocalBrowserController::SetPageRelative(int offset)
 {
-	int page = std::min(std::max(browserModel->GetPageNum() + offset, 1), browserModel->GetPageCount());
+	int page = std::max(std::min(browserModel->GetPageNum() + offset, browserModel->GetPageCount() - 1), 0);
 	if (page != browserModel->GetPageNum())
 		browserModel->UpdateSavesList(page);
 }
 
 void LocalBrowserController::Update()
 {
-	if(browserModel->GetSave())
+	if (browserModel->GetSave())
 	{
 		Exit();
 	}
@@ -157,16 +153,15 @@ void LocalBrowserController::SetMoveToFront(bool move)
 void LocalBrowserController::Exit()
 {
 	browserView->CloseActiveWindow();
-	if(callback)
-		callback->ControllerExit();
+	if (onDone)
+		onDone();
 	HasDone = true;
 }
 
 LocalBrowserController::~LocalBrowserController()
 {
-	browserView->CloseActiveWindow();
-	delete callback;
 	delete browserModel;
+	browserView->CloseActiveWindow();
 	delete browserView;
 }
 

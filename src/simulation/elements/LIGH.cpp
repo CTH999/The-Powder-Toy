@@ -1,11 +1,17 @@
-#include "simulation/Elements.h"
+#include "simulation/ElementCommon.h"
 
-//#TPT-Directive ElementClass Element_LIGH PT_LIGH 87
-Element_LIGH::Element_LIGH()
+#include "graphics/Pixel.h"
+
+static int update(UPDATE_FUNC_ARGS);
+static int graphics(GRAPHICS_FUNC_ARGS);
+static void create(ELEMENT_CREATE_FUNC_ARGS);
+static void create_line_par(Simulation * sim, int x1, int y1, int x2, int y2, int c, float temp, int life, int tmp, int tmp2, int i);
+
+void Element::Element_LIGH()
 {
 	Identifier = "DEFAULT_PT_LIGH";
 	Name = "LIGH";
-	Colour = PIXPACK(0xFFFFC0);
+	Colour = 0xFFFFC0_rgb;
 	MenuVisible = 1;
 	MenuSection = SC_EXPLOSIVE;
 	Enabled = 1;
@@ -27,7 +33,6 @@ Element_LIGH::Element_LIGH()
 
 	Weight = 100;
 
-	Temperature = R_TEMP+0.0f	+273.15f;
 	HeatConduct = 0;
 	Description = "Lightning. Change the brush size to set the size of the lightning.";
 
@@ -42,34 +47,29 @@ Element_LIGH::Element_LIGH()
 	HighTemperature = ITH;
 	HighTemperatureTransition = NT;
 
-	Update = &Element_LIGH::update;
-	Graphics = &Element_LIGH::graphics;
+	Update = &update;
+	Graphics = &graphics;
+	Create = &create;
 }
 
-#define LIGHTING_POWER 0.65
+constexpr float LIGHTING_POWER = 0.65f;
 
-//#TPT-Directive ElementHeader Element_LIGH static int update(UPDATE_FUNC_ARGS)
-int Element_LIGH::update(UPDATE_FUNC_ARGS)
-
+static int update(UPDATE_FUNC_ARGS)
 {
 	/*
-	 *
 	 * tmp2:
-	 * -1 - part will be removed
-	 * 0 - "branches" of the lightning
-	 * 1 - bending
+	 * 0 - bending
+	 * 1 - bending (particle order deferred)
 	 * 2 - branching
-	 * 3 - transfer spark or make destruction
+	 * 3 - branching (particle order deferred)
 	 * 4 - first pixel
+	 * 5+  normal segment. Starts at 8, counts down and is removed at 5
 	 *
-	 * life - "thickness" of lighting (but anyway one pixel)
+	 * life - power of lightning, influences reaction strength and segment length
 	 *
-	 * tmp - angle of lighting, measured in degrees anticlockwise from the positive x direction
-	 *
-	*/
-	int r,rx,ry,rt, multipler, powderful;
-	float angle, angle2=-1;
-	powderful = parts[i].temp*(1+parts[i].life/40)*LIGHTING_POWER;
+	 * tmp - angle of lighting, measured in degrees counterclockwise from the positive x direction
+	 */
+	auto powderful = int(parts[i].temp*(1+parts[i].life/40)*LIGHTING_POWER);
 	//Element_FIRE::update(UPDATE_FUNC_SUBCALL_ARGS);
 	if (sim->aheat_enable)
 	{
@@ -81,23 +81,27 @@ int Element_LIGH::update(UPDATE_FUNC_ARGS)
 			sim->hv[y/CELL][x/CELL] = MAX_TEMP;
 	}
 
-	for (rx=-2; rx<3; rx++)
-		for (ry=-2; ry<3; ry++)
-			if (BOUNDS_CHECK && (rx || ry))
+	auto &sd = SimulationData::CRef();
+	auto &elements = sd.elements;
+	for (auto rx = -2; rx <= 2; rx++)
+	{
+		for (auto ry = -2; ry <= 2; ry++)
+		{
+			if (rx || ry)
 			{
-				r = pmap[y+ry][x+rx];
+				auto r = pmap[y+ry][x+rx];
 				if (!r)
 					continue;
-				rt = TYP(r);
-				if ((surround_space || sim->elements[rt].Explosive) &&
+				auto rt = TYP(r);
+				if ((surround_space || elements[rt].Explosive) &&
 				    (rt!=PT_SPNG || parts[ID(r)].life==0) &&
-					sim->elements[rt].Flammable && (sim->elements[rt].Flammable + RNG::Ref().chance(sim->pv[(y+ry)/CELL][(x+rx)/CELL] * 10.0f, 1000)))
+					elements[rt].Flammable && sim->rng.chance(elements[rt].Flammable + int(sim->pv[(y+ry)/CELL][(x+rx)/CELL] * 10.0f), 1000))
 				{
 					sim->part_change_type(ID(r),x+rx,y+ry,PT_FIRE);
-					parts[ID(r)].temp = restrict_flt(sim->elements[PT_FIRE].Temperature + (sim->elements[rt].Flammable/2), MIN_TEMP, MAX_TEMP);
-					parts[ID(r)].life = RNG::Ref().between(180, 259);
+					parts[ID(r)].temp = restrict_flt(elements[PT_FIRE].DefaultProperties.temp + (elements[rt].Flammable/2), MIN_TEMP, MAX_TEMP);
+					parts[ID(r)].life = sim->rng.between(180, 259);
 					parts[ID(r)].tmp = parts[ID(r)].ctype = 0;
-					if (sim->elements[rt].Explosive)
+					if (elements[rt].Explosive)
 						sim->pv[y/CELL][x/CELL] += 0.25f * CFDS;
 				}
 				switch (rt)
@@ -115,12 +119,12 @@ int Element_LIGH::update(UPDATE_FUNC_ARGS)
 				case PT_PLUT:
 					parts[ID(r)].temp = restrict_flt(parts[ID(r)].temp+powderful, MIN_TEMP, MAX_TEMP);
 					sim->pv[y/CELL][x/CELL] +=powderful/35;
-					if (RNG::Ref().chance(1, 3))
+					if (sim->rng.chance(1, 3))
 					{
 						sim->part_change_type(ID(r),x+rx,y+ry,PT_NEUT);
-						parts[ID(r)].life = RNG::Ref().between(480, 959);
-						parts[ID(r)].vx = RNG::Ref().between(-5, 5);
-						parts[ID(r)].vy = RNG::Ref().between(-5, 5);
+						parts[ID(r)].life = sim->rng.between(480, 959);
+						parts[ID(r)].vx = float(sim->rng.between(-5, 5));
+						parts[ID(r)].vy = float(sim->rng.between(-5, 5));
 					}
 					break;
 				case PT_COAL:
@@ -138,7 +142,7 @@ int Element_LIGH::update(UPDATE_FUNC_ARGS)
 					break;
 				case PT_HEAC:
 					parts[ID(r)].temp = restrict_flt(parts[ID(r)].temp+powderful/10, MIN_TEMP, MAX_TEMP);
-					if (parts[ID(r)].temp > sim->elements[PT_HEAC].HighTemperature)
+					if (parts[ID(r)].temp > elements[PT_HEAC].HighTemperature)
 					{
 						sim->part_change_type(ID(r), x+rx, y+ry, PT_LAVA);
 						parts[ID(r)].ctype = PT_HEAC;
@@ -147,144 +151,73 @@ int Element_LIGH::update(UPDATE_FUNC_ARGS)
 				default:
 					break;
 				}
-				if ((sim->elements[TYP(r)].Properties&PROP_CONDUCTS) && parts[ID(r)].life==0)
+				if ((elements[TYP(r)].Properties&PROP_CONDUCTS) && parts[ID(r)].life==0)
 					sim->create_part(ID(r),x+rx,y+ry,PT_SPRK);
 				sim->pv[y/CELL][x/CELL] += powderful/400;
-				if (sim->elements[TYP(r)].HeatConduct) parts[ID(r)].temp = restrict_flt(parts[ID(r)].temp+powderful/1.3, MIN_TEMP, MAX_TEMP);
+				if (!sd.IsHeatInsulator(parts[ID(r)])) parts[ID(r)].temp = restrict_flt(parts[ID(r)].temp+powderful/1.3, MIN_TEMP, MAX_TEMP);
 			}
-	if (parts[i].tmp2==3)
-	{
-		parts[i].tmp2=0;
-		return 1;
+		}
 	}
-	else if (parts[i].tmp2<=-1)
+	// Deferred branch or bend; or in removal countdown stage
+	if (parts[i].tmp2 == 1 || parts[i].tmp2 == 3 || (parts[i].tmp2 >= 6 && parts[i].tmp2 <= 8))
+	{
+		// Probably set via console, make sure it doesn't stick around forever
+		if (parts[i].tmp2 >= 9)
+			parts[i].tmp2 = 7;
+		else
+			parts[i].tmp2--;
+		return 0;
+	}
+	if (parts[i].tmp2 == 5 || parts[i].life <= 1)
 	{
 		sim->kill_part(i);
 		return 1;
 	}
-	else if (parts[i].tmp2<=0 || parts[i].life<=1)
+	auto angle = float((parts[i].tmp + sim->rng.between(-30, 30)) % 360);
+	auto multipler = int(parts[i].life * 1.5) + sim->rng.between(0, parts[i].life);
+	auto rx=int(cos(angle*TPT_PI_FLT/180)*multipler);
+	auto ry=int(-sin(angle*TPT_PI_FLT/180)*multipler);
+	create_line_par(sim, x, y, x+rx, y+ry, PT_LIGH, parts[i].temp, parts[i].life, int(angle), parts[i].tmp2, i);
+	if (parts[i].tmp2 == 2)// && pNear == -1)
 	{
-		if (parts[i].tmp2>0)
-			parts[i].tmp2=0;
-		parts[i].tmp2--;
-		return 1;
+		auto angle2 = float(((int)angle + sim->rng.between(-100, 100)) % 360);
+		rx=int(cos(angle2*TPT_PI_FLT/180)*multipler);
+		ry=int(-sin(angle2*TPT_PI_FLT/180)*multipler);
+		create_line_par(sim, x, y, x+rx, y+ry, PT_LIGH, parts[i].temp, parts[i].life, int(angle2), parts[i].tmp2, i);
 	}
 
-	//Completely broken and laggy function, possibly can be fixed later
-	/*int pNear = LIGH_nearest_part(sim, i, parts[i].life*2.5);
-	if (pNear!=-1)
-	{
-		int t=parts[pNear].type;
-		float n_angle; // angle to nearest part
-		float angle_diff;
-		rx=parts[pNear].x-x;
-		ry=parts[pNear].y-y;
-		if (rx!=0 || ry!=0)
-			n_angle = atan2f(-ry, rx);
-		else
-			n_angle = 0;
-		if (n_angle<0)
-			n_angle+=M_PI*2;
-		angle_diff = fabsf(n_angle-parts[i].tmp*M_PI/180);
-		if (angle_diff>M_PI)
-			angle_diff = M_PI*2 - angle_diff;
-		if (parts[i].life<5 || angle_diff<M_PI*0.8) // lightning strike
-		{
-			create_line_par(sim, x, y, x+rx, y+ry, PT_LIGH, parts[i].temp, parts[i].life, parts[i].tmp-90, 0);
-
-			if (t!=PT_TESC)
-			{
-				pNear=contact_part(sim, pNear, PT_LIGH);
-				if (pNear!=-1)
-				{
-					parts[pNear].tmp2=3;
-					parts[pNear].life=(int)(1.0*parts[i].life/2-1);
-					parts[pNear].tmp=parts[i].tmp-180;
-					parts[pNear].temp=parts[i].temp;
-				}
-			}
-		}
-		else pNear=-1;
-	}*/
-
-	//if (parts[i].tmp2==1/* || near!=-1*/)
-	//angle=0;//parts[i].tmp + RNG::Ref().between(-30, 30);
-	angle = (parts[i].tmp + RNG::Ref().between(-30, 30)) % 360;
-	multipler = parts[i].life * 1.5 + RNG::Ref().between(0, parts[i].life);
-	rx=cos(angle*M_PI/180)*multipler;
-	ry=-sin(angle*M_PI/180)*multipler;
-	create_line_par(sim, x, y, x+rx, y+ry, PT_LIGH, parts[i].temp, parts[i].life, angle, parts[i].tmp2);
-	if (parts[i].tmp2==2)// && pNear==-1)
-	{
-		angle2 = ((int)angle + RNG::Ref().between(-100, 100)) % 360;
-		rx=cos(angle2*M_PI/180)*multipler;
-		ry=-sin(angle2*M_PI/180)*multipler;
-		create_line_par(sim, x, y, x+rx, y+ry, PT_LIGH, parts[i].temp, parts[i].life, angle2, parts[i].tmp2);
-	}
-
-	parts[i].tmp2=-1;
-	return 1;
+	parts[i].tmp2 = 7;
+	return 0;
 }
 
-//#TPT-Directive ElementHeader Element_LIGH static int LIGH_nearest_part(Simulation * sim, int ci, int max_d)
-int Element_LIGH::LIGH_nearest_part(Simulation * sim, int ci, int max_d)
-{
-	int distance = (max_d!=-1)?max_d:MAX_DISTANCE;
-	int ndistance = 0;
-	int id = -1;
-	int i = 0;
-	int cx = (int)sim->parts[ci].x;
-	int cy = (int)sim->parts[ci].y;
-	for (i=0; i<=sim->parts_lastActiveIndex; i++)
-	{
-		if (sim->parts[i].type && sim->parts[i].life && i!=ci && sim->parts[i].type!=PT_LIGH && sim->parts[i].type!=PT_THDR && sim->parts[i].type!=PT_NEUT && sim->parts[i].type!=PT_PHOT)
-		{
-			ndistance = std::abs(cx-sim->parts[i].x)+std::abs(cy-sim->parts[i].y);// Faster but less accurate  Older: sqrt(pow(cx-parts[i].x, 2)+pow(cy-parts[i].y, 2));
-			if (ndistance<distance)
-			{
-				distance = ndistance;
-				id = i;
-			}
-		}
-	}
-	return id;
-}
-
-//#TPT-Directive ElementHeader Element_LIGH static int contact_part(Simulation * sim, int i, int tp)
-int Element_LIGH::contact_part(Simulation * sim, int i, int tp)
-{
-	int x=sim->parts[i].x, y=sim->parts[i].y;
-	int r,rx,ry;
-	for (rx=-2; rx<3; rx++)
-		for (ry=-2; ry<3; ry++)
-			if (x+rx>=0 && y+ry>=0 && x+rx<XRES && y+ry<YRES && (rx || ry))
-			{
-				r = sim->pmap[y+ry][x+rx];
-				if (!r)
-					continue;
-				if (TYP(r)==tp)
-					return ID(r);
-			}
-	return -1;
-}
-
-//#TPT-Directive ElementHeader Element_LIGH static bool create_LIGH(Simulation * sim, int x, int y, int c, int temp, int life, int tmp, int tmp2, bool last)
-bool Element_LIGH::create_LIGH(Simulation * sim, int x, int y, int c, int temp, int life, int tmp, int tmp2, bool last)
+static bool create_LIGH(Simulation * sim, int x, int y, int c, float temp, int life, int tmp, int tmp2, bool last, int i)
 {
 	int p = sim->create_part(-1, x, y,c);
 	if (p != -1)
 	{
-		sim->parts[p].temp = temp;
+		sim->parts[p].temp = float(temp);
 		sim->parts[p].tmp = tmp;
+		sim->parts[p].dcolour = sim->parts[i].dcolour;
 		if (last)
 		{
-			sim->parts[p].tmp2 = 1 + (RNG::Ref().between(0, 199) > tmp2*tmp2/10+60);
-			sim->parts[p].life = (int)(life/1.5 - RNG::Ref().between(0, 1));
+			int nextSegmentLife = (int)(life/1.5 - sim->rng.between(0, 1));
+			sim->parts[p].life = nextSegmentLife;
+			if (nextSegmentLife > 1)
+			{
+				// Decide whether to branch or to bend
+				bool doBranch = sim->rng.chance(7, 10);
+				sim->parts[p].tmp2 = (doBranch ? 2 : 0) + (p > i && tmp2 != 4 ? 1 : 0);
+			}
+			// Not enough energy to continue
+			else
+			{
+				sim->parts[p].tmp2 = 7 + (p > i ? 1 : 0);
+			}
 		}
 		else
 		{
 			sim->parts[p].life = life;
-			sim->parts[p].tmp2 = 0;
+			sim->parts[p].tmp2 = 7 + (p > i ? 1 : 0);
 		}
 	}
 	else if (x >= 0 && x < XRES && y >= 0 && y < YRES)
@@ -297,8 +230,7 @@ bool Element_LIGH::create_LIGH(Simulation * sim, int x, int y, int c, int temp, 
 	return false;
 }
 
-//#TPT-Directive ElementHeader Element_LIGH static void create_line_par(Simulation * sim, int x1, int y1, int x2, int y2, int c, int temp, int life, int tmp, int tmp2)
-void Element_LIGH::create_line_par(Simulation * sim, int x1, int y1, int x2, int y2, int c, int temp, int life, int tmp, int tmp2)
+static void create_line_par(Simulation * sim, int x1, int y1, int x2, int y2, int c, float temp, int life, int tmp, int tmp2, int i)
 {
 	bool reverseXY = abs(y2-y1) > abs(x2-x1), back = false;
 	int x, y, dx, dy, Ystep;
@@ -328,9 +260,9 @@ void Element_LIGH::create_line_par(Simulation * sim, int x1, int y1, int x2, int
 		{
 			bool ret;
 			if (reverseXY)
-				ret = create_LIGH(sim, y, x, c, temp, life, tmp, tmp2,x==x2);
+				ret = create_LIGH(sim, y, x, c, temp, life, tmp, tmp2,x==x2, i);
 			else
-				ret = create_LIGH(sim, x, y, c, temp, life, tmp, tmp2,x==x2);
+				ret = create_LIGH(sim, x, y, c, temp, life, tmp, tmp2,x==x2, i);
 			if (ret)
 				return;
 
@@ -348,9 +280,9 @@ void Element_LIGH::create_line_par(Simulation * sim, int x1, int y1, int x2, int
 		{
 			bool ret;
 			if (reverseXY)
-				ret = create_LIGH(sim, y, x, c, temp, life, tmp, tmp2,x==x2);
+				ret = create_LIGH(sim, y, x, c, temp, life, tmp, tmp2,x==x2, i);
 			else
-				ret = create_LIGH(sim, x, y, c, temp, life, tmp, tmp2,x==x2);
+				ret = create_LIGH(sim, x, y, c, temp, life, tmp, tmp2,x==x2, i);
 			if (ret)
 				return;
 
@@ -364,18 +296,38 @@ void Element_LIGH::create_line_par(Simulation * sim, int x1, int y1, int x2, int
 	}
 }
 
-
-//#TPT-Directive ElementHeader Element_LIGH static int graphics(GRAPHICS_FUNC_ARGS)
-int Element_LIGH::graphics(GRAPHICS_FUNC_ARGS)
-
+static int graphics(GRAPHICS_FUNC_ARGS)
 {
 	*firea = 120;
 	*firer = *colr = 235;
 	*fireg = *colg = 245;
 	*fireb = *colb = 255;
-	*pixel_mode |= PMODE_GLOW | FIRE_ADD;
+	*pixel_mode |= PMODE_GLOW | FIRE_ADD | DECO_FIRE;
 	return 1;
 }
 
-
-Element_LIGH::~Element_LIGH() {}
+static void create(ELEMENT_CREATE_FUNC_ARGS)
+{
+	float gx, gy, gsize;
+	if (v >= 0)
+	{
+		if (v > 55)
+			v = 55;
+		sim->parts[i].life = v;
+	}
+	else
+		sim->parts[i].life = 30;
+	sim->parts[i].temp = sim->parts[i].life * 150.0f; // temperature of the lightning shows the power of the lightning
+	sim->GetGravityField(x, y, 1.0f, 1.0f, gx, gy);
+	gsize = gx * gx + gy * gy;
+	if (gsize < 0.0016f)
+	{
+		float angle = sim->rng.between(0, 6283) * 0.001f; //(in radians, between 0 and 2*pi)
+		gsize = sqrtf(gsize);
+		// randomness in weak gravity fields (more randomness with weaker fields)
+		gx += cosf(angle) * (0.04f - gsize);
+		gy += sinf(angle) * (0.04f - gsize);
+	}
+	sim->parts[i].tmp = (static_cast<int>(atan2f(-gy, gx) * (180.0f / TPT_PI_FLT)) + sim->rng.between(-20, 20) + 360) % 360;
+	sim->parts[i].tmp2 = 4;
+}
