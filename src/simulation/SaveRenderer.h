@@ -1,25 +1,26 @@
-#pragma once
-#include <memory>
+#ifndef SAVERENDERER_H_
+#define SAVERENDERER_H_
+#include "common/Singleton.h"
 #include <mutex>
-#include <utility>
-#include <vector>
-#include "common/ExplicitSingleton.h"
-#include "graphics/RendererSettings.h"
-#include "common/String.h"
 
 class GameSave;
 class VideoBuffer;
+class Graphics;
 class Simulation;
 class Renderer;
 
-class SaveRenderer: public ExplicitSingleton<SaveRenderer>
-{
-	std::unique_ptr<Simulation> sim;
-	std::unique_ptr<Renderer> ren;
+class SaveRenderer: public Singleton<SaveRenderer> {
+	Graphics * g;
+	Simulation * sim;
+	Renderer * ren;
 	std::mutex renderMutex;
-
 public:
 	SaveRenderer();
-	~SaveRenderer();
-	std::unique_ptr<VideoBuffer> Render(const GameSave *save, bool fire, RendererSettings rendererSettings);
+	VideoBuffer * Render(GameSave * save, bool decorations = true, bool fire = true);
+	VideoBuffer * Render(unsigned char * saveData, int saveDataSize, bool decorations = true, bool fire = true);
+	void CopyModes(Renderer *source);
+	void ResetModes();
+	virtual ~SaveRenderer();
 };
+
+#endif /* SAVERENDERER_H_ */
