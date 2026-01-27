@@ -218,6 +218,7 @@ public:
 	int parts_avg(int ci, int ni, int t);
 	void UpdateParticles(int start, int end); // Dispatches an update to the range [start, end).
 	void SimulateGoL();
+	bool ApplyIntegerRegisterBehaviour(int i, int &reg, int registerSpec);
 	void RecalcFreeParticles(bool do_life_dec);
 	void CheckStacking();
 	void BeforeSim(bool willUpdate);

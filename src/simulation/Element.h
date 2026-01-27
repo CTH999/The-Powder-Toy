@@ -1,15 +1,13 @@
-#pragma once
-#include "common/Vec2.h"
+#ifndef ELEMENTCLASS_H
+#define ELEMENTCLASS_H
+
 #include "graphics/Pixel.h"
 #include "ElementDefs.h"
 #include "Particle.h"
 #include "StructProperty.h"
-#include "ElementNumbers.h"
-#include <memory>
 
 class Simulation;
 class Renderer;
-struct GraphicsFuncContext;
 class VideoBuffer;
 struct Particle;
 class Element
@@ -17,7 +15,7 @@ class Element
 public:
 	ByteString Identifier;
 	String Name;
-	RGB Colour;
+	pixel Colour;
 	int MenuVisible;
 	int MenuSection;
 	int Enabled;
@@ -40,10 +38,8 @@ public:
 	unsigned int PhotonReflectWavelengths;
 	int Weight;
 	unsigned char HeatConduct;
-	float HeatCapacity; // Volumetric heat capacity per one pixel. Must be nonzero. The default value is 1.0f.
 	String Description;
 	unsigned int Properties;
-	unsigned int CarriesTypeIn;
 
 	float LowPressure;
 	int LowPressureTransition;
@@ -63,7 +59,12 @@ public:
 
 	bool (*CtypeDraw) (CTYPEDRAW_FUNC_ARGS);
 
-	std::unique_ptr<VideoBuffer> (*IconGenerator)(int, Vec2<int>);
+	int LifeSpec = 0;
+	int CtypeSpec = 0;
+	int TmpSpec = 0;
+	int Tmp2Spec = 0;
+
+	VideoBuffer * (*IconGenerator)(int, int, int);
 
 	Particle DefaultProperties;
 
@@ -78,7 +79,9 @@ public:
 	 by higher-level processes referring to them by name such as Lua or the property tool **/
 	static std::vector<StructProperty> const &GetProperties();
 
-#define ELEMENT_NUMBERS_DECLARE(name, id) void Element_ ## name ();
-	ELEMENT_NUMBERS(ELEMENT_NUMBERS_DECLARE)
+#define ELEMENT_NUMBERS_DECLARE
+#include "ElementNumbers.h"
 #undef ELEMENT_NUMBERS_DECLARE
 };
+
+#endif

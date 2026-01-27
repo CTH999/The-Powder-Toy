@@ -41,6 +41,8 @@ void Element::Element_PSTN()
 	Properties = TYPE_SOLID;
 	CarriesTypeIn = 1U << FIELD_CTYPE;
 
+	Tmp2Spec = RSPEC_STORAGE_TYPE_NUMBER;
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;

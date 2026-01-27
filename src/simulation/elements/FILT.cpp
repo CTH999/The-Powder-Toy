@@ -35,6 +35,9 @@ void Element::Element_FILT()
 
 	Properties = TYPE_SOLID | PROP_PHOTPASS | PROP_NOAMBHEAT | PROP_LIFE_DEC;
 
+	LifeSpec = RSPEC_STORAGE_TYPE_NUMBER | RSPEC_BEHAVIOUR_DEC;
+	CtypeSpec = RSPEC_STORAGE_TYPE_WAVELENGTH;
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;

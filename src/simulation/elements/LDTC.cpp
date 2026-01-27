@@ -35,6 +35,8 @@ void Element::Element_LDTC()
 	Properties = TYPE_SOLID | PROP_NOCTYPEDRAW;
 	CarriesTypeIn = 1U << FIELD_CTYPE;
 
+	Tmp2Spec = RSPEC_STORAGE_TYPE_NUMBER;
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;

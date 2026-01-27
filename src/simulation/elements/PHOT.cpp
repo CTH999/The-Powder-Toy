@@ -38,6 +38,9 @@ void Element::Element_PHOT()
 
 	Properties = TYPE_ENERGY | PROP_PHOTPASS | PROP_LIFE_DEC | PROP_LIFE_KILL_DEC;
 
+	LifeSpec = RSPEC_STORAGE_TYPE_NUMBER | RSPEC_BEHAVIOUR_DEC | RSPEC_BEHAVIOUR_DEC_ZERO_KILL;
+	CtypeSpec = RSPEC_STORAGE_TYPE_WAVELENGTH;
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;

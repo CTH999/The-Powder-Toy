@@ -38,6 +38,8 @@ void Element::Element_LAVA()
 	Properties = TYPE_LIQUID|PROP_LIFE_DEC;
 	CarriesTypeIn = 1U << FIELD_CTYPE;
 
+	LifeSpec = RSPEC_STORAGE_TYPE_NUMBER | RSPEC_BEHAVIOUR_DEC;
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = IPH;

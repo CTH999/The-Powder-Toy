@@ -39,6 +39,8 @@ void Element::Element_PIPE()
 	Properties = TYPE_SOLID | PROP_LIFE_DEC;
 	CarriesTypeIn = 1U << FIELD_CTYPE;
 
+	LifeSpec = RSPEC_STORAGE_TYPE_NUMBER | RSPEC_BEHAVIOUR_DEC;
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = 10.0f;

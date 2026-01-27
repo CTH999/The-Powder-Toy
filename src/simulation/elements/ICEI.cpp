@@ -35,6 +35,8 @@ void Element::Element_ICEI()
 	Properties = TYPE_SOLID|PROP_LIFE_DEC|PROP_NEUTPASS;
 	CarriesTypeIn = 1U << FIELD_CTYPE;
 
+	LifeSpec = RSPEC_STORAGE_TYPE_NUMBER | RSPEC_BEHAVIOUR_DEC;
+
 	LowPressure = IPL;
 	LowPressureTransition = NT;
 	HighPressure = 0.8f;
