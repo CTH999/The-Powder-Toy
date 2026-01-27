@@ -121,6 +121,14 @@ void RasterDrawMethods<Derived>::BlendRect(Rect<int> rect, RGBA colour)
 }
 
 template<typename Derived>
+void RasterDrawMethods<Derived>::XorRect(Rect<int> rect)
+{
+	RasterizeRect(rect, [this](Vec2<int> pos) {
+		XorPixel(pos);
+	});
+}
+
+template<typename Derived>
 void RasterDrawMethods<Derived>::XorDottedRect(Rect<int> rect)
 {
 	RasterizeDottedRect(rect, [this](Vec2<int> pos) {
