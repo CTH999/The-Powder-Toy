@@ -8,6 +8,7 @@
 #include "simulation/Particle.h"
 #include "simulation/MissingElements.h"
 #include "simulation/gravity/GravityData.h"
+#include "simulation/SimulationSettings.h"
 #include "Misc.h"
 #include "SimulationConfig.h"
 #include <vector>
@@ -107,7 +108,11 @@ public:
 	float customGravityY = 0.0f;
 	int airMode = 0;
 	float ambientAirTemp = R_TEMP + 273.15f;
+	float edgePressure = 0;
+	float edgeVelocityX = 0;
+	float edgeVelocityY = 0;
 	float vorticityCoeff = 0.0f;
+	int convectionMode = AIRC_LEGACY;
 	int edgeMode = 0;
 	bool wantAuthors = true;
 

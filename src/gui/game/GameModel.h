@@ -107,7 +107,11 @@ private:
 
 	int edgeMode;
 	float ambientAirTemp;
+	float edgePressure;
+	float edgeVelocityX;
+	float edgeVelocityY;
 	float vorticityCoeff;
+	int convectionMode;
 	int decoSpace;
 
 	String infoTip;
@@ -166,8 +170,16 @@ public:
 	}
 	void SetAmbientAirTemperature(float ambientAirTemp);
 	float GetAmbientAirTemperature();
+	void SetEdgePressure(float edgePressure);
+	float GetEdgePressure();
+	void SetEdgeVelocityX(float edgeVelocityX);
+	float GetEdgeVelocityX();
+	void SetEdgeVelocityY(float edgeVelocityY);
+	float GetEdgeVelocityY();
 	void SetVorticityCoeff(float vorticityCoeff);
 	float GetVorticityCoeff();
+	void SetConvectionMode(int convMode);
+	int GetConvectionMode();
 	void SetDecoSpace(int decoSpace);
 	int GetDecoSpace();
 
